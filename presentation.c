@@ -78,6 +78,12 @@ void _presentation_call_action_cb(int action) {
 void _perform_action_goto_dest(PopplerActionGotoDest *action);
 void _perform_action_named(PopplerActionNamed *action);
 
+int presentation_has_action_at(double x, double y) {
+  if (page_cache_get_action_from_pos(x, y))
+    return 1;
+  return 0;
+}
+
 int presentation_perform_action_at(double x, double y) {
   PopplerAction *action = page_cache_get_action_from_pos(x, y);
   if (!action) {
@@ -148,6 +154,14 @@ void _perform_action_named(PopplerActionNamed *action) {
   }
   if (actionid) {
     _presentation_call_action_cb(actionid);
+  }
+}
+
+void presentation_get_status(PresentationStatus *status) {
+  if (status) {
+    status->current_page = _presentation.current_index+1;
+    status->num_pages = _presentation.page_count;
+    status->cached_pages = 0;
   }
 }
 

@@ -6,6 +6,7 @@
 #include "page-cache.h"
 #include "presentation.h"
 #include "utils.h"
+#include <time.h>
 
 static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer data);
 static gboolean _configure_event(GtkWidget *widget, GdkEventConfigure *event, gpointer data);
@@ -31,6 +32,9 @@ void config_toggle_console(void);
 void main_cleanup(void);
 void main_quit(void);
 
+gboolean main_regular_update(gpointer data);
+gboolean main_check_mouse_motion(gpointer data);
+
 struct _Win {
   GtkWidget *win;
   gint cx;
@@ -55,6 +59,11 @@ struct _PresenterState {
   double page_height;
   int page_guess_split;
 } _state;
+
+GdkCursor *hand_cursor = NULL;
+GdkCursor *blank_cursor = NULL;
+guint hide_cursor_source = 0;
+GTimer *hide_cursor_timer = NULL;
 
 int main(int argc, char **argv) {
   unsigned int i;
@@ -121,6 +130,13 @@ int main(int argc, char **argv) {
   gtk_widget_show_all(windows[0].win);
   gtk_widget_show_all(windows[1].win);
 
+  hand_cursor = gdk_cursor_new(GDK_HAND2);
+
+  g_timeout_add_seconds(1, (GSourceFunc)main_regular_update, NULL);
+  hide_cursor_timer = g_timer_new();
+  g_timer_start(hide_cursor_timer);
+  hide_cursor_source = g_idle_add(main_check_mouse_motion, NULL);
+
   gtk_main();
 
   main_cleanup();
@@ -137,6 +153,14 @@ void main_cleanup(void) {
     }
   }
   g_free(_config.filename);
+  if (hide_cursor_timer)
+    g_timer_destroy(hide_cursor_timer);
+  if (hide_cursor_source)
+    g_source_remove(hide_cursor_source);
+  if (hand_cursor)
+    gdk_cursor_unref(hand_cursor);
+  if (blank_cursor)
+    gdk_cursor_unref(blank_cursor);
 }
 
 /* be downwards comaptible */
@@ -265,6 +289,25 @@ static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gp
 }
 
 static gboolean _motion_notify_event(GtkWidget *widget, GdkEventMotion *event, gpointer data) {
+  unsigned int id = GPOINTER_TO_UINT(data);
+  int found_link = 0;
+  double px, py;
+  if (main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
+    if (page_cache_get_action_from_pos(px, py)) {
+      found_link = 1;
+    }
+  }
+  if (found_link) {
+    gdk_window_set_cursor(widget->window, hand_cursor);
+  }
+  else {
+    gdk_window_set_cursor(widget->window, NULL);
+  }
+  if (!hide_cursor_timer)
+    hide_cursor_timer = g_timer_new();
+  g_timer_start(hide_cursor_timer);
+  if (!hide_cursor_source)
+    hide_cursor_source = g_idle_add(main_check_mouse_motion, NULL);
   return FALSE;
 }
 
@@ -333,6 +376,13 @@ static void render_console_window(cairo_t *cr, int width, int height) {
   double scale, tmp;
   double page_offset = 0.0f;
   int guess_split;
+  cairo_matrix_t m;
+  time_t tval;
+  struct tm *curtval;
+  char dbuf[256];
+  char buffer[512];
+  cairo_text_extents_t ext;
+  PresentationStatus pstate;
 
   index = presentation_get_current_page();
   if (page_cache_fetch_page(index, &page_surface, &w, &h, &guess_split) != 0) {
@@ -348,11 +398,29 @@ static void render_console_window(cairo_t *cr, int width, int height) {
   if (tmp < scale) scale = tmp;
   scale *= 0.8f;
 
+  cairo_get_matrix(cr, &m);
   cairo_scale(cr, scale, scale);
 
   cairo_set_source_surface(cr, page_surface, page_offset, 0.0f);
   cairo_rectangle(cr, 0.0f, 0.0f, w, h);
   cairo_fill(cr);
+
+  cairo_set_matrix(cr, &m);
+  
+  /* render time */
+  time(&tval);
+  curtval = localtime(&tval);
+  strftime(dbuf, 256, "%H:%M:%S", curtval);
+
+  presentation_get_status(&pstate);
+
+  sprintf(buffer, "%d/%d, %s", pstate.current_page, pstate.num_pages, dbuf);
+
+  cairo_set_source_rgb(cr, 1.0f, 1.0f, 1.0f);
+  cairo_set_font_size(cr, 24);
+  cairo_text_extents(cr, buffer, &ext);
+  cairo_move_to(cr, width-ext.x_advance, height+ext.y_bearing);
+  cairo_show_text(cr, buffer);
 }
 
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py) {
@@ -477,4 +545,28 @@ void config_toggle_console(void) {
   _config.show_console = !_config.show_console;
   main_reconfigure_windows();
 }
+
+gboolean main_regular_update(gpointer data) {
+  if (_config.show_console) {
+    gtk_widget_queue_draw(windows[1].win);
+  }
+  return TRUE;
+}
+
+gboolean main_check_mouse_motion(gpointer data) {
+  if (!blank_cursor)
+    blank_cursor = gdk_cursor_new(GDK_BLANK_CURSOR);
+  gdouble elapsed = g_timer_elapsed(hide_cursor_timer, NULL);
+  if (elapsed > 3) {
+    g_timer_stop(hide_cursor_timer);
+    g_timer_reset(hide_cursor_timer);
+    hide_cursor_source = 0;
+    gdk_window_set_cursor(windows[0].win->window, blank_cursor);
+    gdk_window_set_cursor(windows[1].win->window, blank_cursor);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+
 
