@@ -19,6 +19,7 @@ typedef struct _PresentationStatus {
   unsigned int current_page;
   unsigned int num_pages;
   unsigned int cached_pages;
+  gsize cached_size;
 } PresentationStatus;
 
 void presentation_init(

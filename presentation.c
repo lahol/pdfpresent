@@ -158,10 +158,13 @@ void _perform_action_named(PopplerActionNamed *action) {
 }
 
 void presentation_get_status(PresentationStatus *status) {
+  PageCacheStatus pcstate;
   if (status) {
     status->current_page = _presentation.current_index+1;
     status->num_pages = _presentation.page_count;
-    status->cached_pages = 0;
+    page_cache_get_status(&pcstate);
+    status->cached_pages = pcstate.pages_cached;
+    status->cached_size = pcstate.cached_size;
   }
 }
 

@@ -2,13 +2,20 @@
 #include <memory.h>
 #include "utils.h"
 #include <cairo.h>
+#include <glib.h>
+
+#define PAGE_STATE_CREATING_SURFACE      1
+#define PAGE_STATE_COMPRESSING           2
+#define PAGE_STATE_UNCOMPRESSING         4
+#define PAGE_STATE_READY                 8
 
 struct _Page {
   unsigned int width;
   unsigned int height;
   cairo_surface_t *surf;
   unsigned char *compressed_buffer;
-  GMutex *data_lock;
+  gsize buffer_size;
+  GMutex *page_lock;
   unsigned int ref_count;
   unsigned int split_guess : 1;
   unsigned int compressed : 1;
@@ -18,6 +25,9 @@ struct _Page {
 struct _PageCache {
   PopplerDocument *doc;
   GMutex *control_lock;
+  GMutex *data_lock;
+  GMutex *poppler_lock;
+  GThread *cache_thread;
   unsigned int pages_cached;
   unsigned int npages;
   unsigned int current_index;
@@ -25,9 +35,13 @@ struct _PageCache {
   struct _Page *pages;
   GList *page_links;
   double current_scale;
+  int do_caching;
 } _page_cache;
 
 struct _Page * _page_cache_get_page(int index);
+int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *width, unsigned int *height);
+int _page_cache_compress_page(int index);
+int _page_cache_uncompress_page(int index);
 
 int page_cache_load_document(const gchar *uri, double scale_to_height) {
   unsigned int i;
@@ -48,10 +62,12 @@ int page_cache_load_document(const gchar *uri, double scale_to_height) {
   _page_cache.scale_to_height = scale_to_height;
   _page_cache.npages = poppler_document_get_n_pages(_page_cache.doc);
   _page_cache.control_lock = g_mutex_new();
+  _page_cache.data_lock = g_mutex_new();
+  _page_cache.poppler_lock = g_mutex_new();
 
   _page_cache.pages = g_malloc0(sizeof(struct _Page)*_page_cache.npages);
   for (i = 0; i < _page_cache.npages; i++) {
-    _page_cache.pages[i].data_lock = g_mutex_new();
+    _page_cache.pages[i].page_lock = g_mutex_new();
   }
   return 0;
 }
@@ -59,8 +75,8 @@ int page_cache_load_document(const gchar *uri, double scale_to_height) {
 void page_cache_unload_document(void) {
   unsigned int i;
   for (i = 0; i < _page_cache.npages && _page_cache.pages; i++) {
-    if (_page_cache.pages[i].data_lock)
-      g_mutex_free(_page_cache.pages[i].data_lock);
+    if (_page_cache.pages[i].page_lock)
+      g_mutex_free(_page_cache.pages[i].page_lock);
     if (_page_cache.pages[i].surf)
       cairo_surface_destroy(_page_cache.pages[i].surf);
     if (_page_cache.pages[i].compressed_buffer)
@@ -69,12 +85,95 @@ void page_cache_unload_document(void) {
   g_free(_page_cache.pages);
   if (_page_cache.control_lock)
     g_mutex_free(_page_cache.control_lock);
+  if (_page_cache.data_lock)
+    g_mutex_free(_page_cache.data_lock);
+  if (_page_cache.poppler_lock)
+    g_mutex_free(_page_cache.poppler_lock);
   if (_page_cache.doc)
     g_object_unref(_page_cache.doc);
 }
 
 unsigned int page_cache_get_page_count(void) {
   return _page_cache.npages;
+}
+
+void page_cache_get_status(PageCacheStatus *status) {
+  unsigned int i;
+  if (status) {
+    status->pages_cached = _page_cache.pages_cached;
+    status->page_count = _page_cache.npages;
+    status->cached_size = 0;
+    for (i = 0; i < status->page_count; i++) {
+      if (g_mutex_trylock(_page_cache.pages[i].page_lock)) {
+        status->cached_size += _page_cache.pages[i].buffer_size;
+        g_mutex_unlock(_page_cache.pages[i].page_lock);
+      }
+    }
+  }
+}
+
+gpointer _page_cache_caching_thread(gpointer data) {
+  unsigned int i;
+  int do_caching = 1;
+  struct _Page *pg = NULL;
+  int next;
+  while (1) {
+    g_mutex_lock(_page_cache.control_lock);
+    i = _page_cache.current_index + 1;
+    if (_page_cache.pages_cached == _page_cache.npages)
+      _page_cache.do_caching = 0;
+    do_caching = _page_cache.do_caching;
+    g_mutex_unlock(_page_cache.control_lock);
+    if (!do_caching)
+      break;
+    next = 0;
+    while (!next) {
+      if (i == _page_cache.npages) {
+        i = 0;
+      }
+      pg = _page_cache_get_page(i);
+      if (pg) {
+        g_mutex_lock(pg->page_lock);
+        if (!pg->compressed)
+          next = 1;
+        g_mutex_unlock(pg->page_lock);
+      }
+      if (!next) {
+        if (i == _page_cache.current_index)
+          break;
+        i++;
+      }
+    }
+    if (next) {
+      pg = _page_cache_get_page(i);
+      if (pg) {
+        g_mutex_lock(pg->page_lock);
+        if (_page_cache_compress_page(i) == 0) {
+          g_mutex_lock(_page_cache.control_lock);
+          _page_cache.pages_cached++;
+          g_mutex_unlock(_page_cache.control_lock);
+        }
+        g_mutex_unlock(pg->page_lock);
+      }
+    }
+  }
+  fprintf(stderr, "Exit caching thread\n");
+  return NULL;
+}
+
+void page_cache_start_caching(void) {
+  _page_cache.do_caching = 1;
+  _page_cache.cache_thread = 
+    g_thread_create(_page_cache_caching_thread,
+                    NULL, TRUE, NULL);
+}
+
+void page_cache_stop_caching(void) {
+  g_mutex_lock(_page_cache.control_lock);
+  _page_cache.do_caching = 0;
+  g_mutex_unlock(_page_cache.control_lock);
+  if (_page_cache.cache_thread)
+    g_thread_join(_page_cache.cache_thread);
 }
 
 int page_cache_load_page(int index) {
@@ -86,6 +185,8 @@ int page_cache_load_page(int index) {
   }
   page_cache_page_reference(index);
   /* load links */
+  g_mutex_lock(_page_cache.data_lock);
+  g_mutex_lock(_page_cache.poppler_lock);
   if (_page_cache.page_links) {
     poppler_page_free_link_mapping(_page_cache.page_links);
     _page_cache.page_links = NULL;
@@ -97,94 +198,97 @@ int page_cache_load_page(int index) {
     _page_cache.current_scale = ph/h;
     g_object_unref(page);
   }
+  g_mutex_unlock(_page_cache.poppler_lock);
+  g_mutex_lock(_page_cache.control_lock);
+  _page_cache.current_index = index;
+  g_mutex_unlock(_page_cache.control_lock);
+  g_mutex_unlock(_page_cache.data_lock);
 
   return 0;
 }
 
 int page_cache_fetch_page(int index, cairo_surface_t **surf, unsigned int *width, unsigned int *height, int *guess_split) {
   struct _Page *pg = _page_cache_get_page(index);
-  double scale, w, h;
-  PopplerPage *page;
-  cairo_t *c;
   if (!pg) {
     return 1;
   }
   /* if surface exists (and is set) get surface */
   /* else if compressed exists, uncompress, get surface */
   /* else init width, height, surface (render) */
+  g_mutex_lock(pg->page_lock);
   if (pg->uncompressed && pg->surf) {
     if (surf) *surf = pg->surf;
     if (width) *width = pg->width;
     if (height) *height = pg->height;
-    if (guess_split) *guess_split = pg->split_guess;
   }
   else if (pg->compressed && pg->compressed_buffer) {
-  }
-  else {
-    page = poppler_document_get_page(_page_cache.doc, index);
-    if (!page) {
+    if (_page_cache_uncompress_page(index) != 0) {
+      g_mutex_unlock(pg->page_lock);
+      fprintf(stderr, "could not uncompress page\n");
       return 1;
     }
-    poppler_page_get_size(page, &w, &h);
-    scale = _page_cache.scale_to_height / h;
-    pg->width = (unsigned int)(scale * w);
-    pg->height = (unsigned int)(scale * h);
+    if (surf) *surf = pg->surf;
+    if (width) *width = pg->width;
+    if (height) *height = pg->height;
+  }
+  else {
+    if (_page_cache_render_page(index, &pg->surf, &pg->width, &pg->height) != 0) {
+      g_mutex_unlock(pg->page_lock);
+      fprintf(stderr, "render page return non null\n");
+      return 1;
+    }
     if (pg->width > 2*pg->height) {
       pg->split_guess = 1;
     }
     else {
       pg->split_guess = 0;
     }
-    pg->surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)(scale * w), (int)(scale * h));
-    if (!pg->surf) {
-      g_object_unref(page);
-      return 1;
-    }
-    c = cairo_create(pg->surf);
-
-    cairo_scale(c, scale, scale);
-    
-    cairo_set_source_rgb(c, 1.0f, 1.0f, 1.0f);
-    cairo_rectangle(c, 0, 0, w, h);
-    cairo_fill(c);
-
-    poppler_page_render(page, c);
-
-    cairo_destroy(c);
-    g_object_unref(page);
 
     pg->uncompressed = 1;
 
     if (surf) *surf = pg->surf;
     if (width) *width = pg->width;
     if (height) *height = pg->height;
-    if (guess_split) *guess_split = pg->split_guess;
   }
+
+  pg->split_guess = (pg->width > 2*pg->height ? 1 : 0);
+  if (guess_split) *guess_split = pg->split_guess;
+
+  g_mutex_unlock(pg->page_lock);
   return 0;
 }
 
 void page_cache_page_reference(int index) {
   struct _Page *pg = _page_cache_get_page(index);
   if (pg) {
+    g_mutex_lock(pg->page_lock);
     pg->ref_count++;
+    g_mutex_unlock(pg->page_lock);
   }
 }
 
 void page_cache_page_unref(int index) {
   struct _Page *pg = _page_cache_get_page(index);
-  if (pg && pg->ref_count) {
-    pg->ref_count--;
-  }
-  if (pg->ref_count == 0) {
-    if (pg->surf) {
-      cairo_surface_destroy(pg->surf);
-      pg->surf = NULL;
+  if (pg) {
+    g_mutex_lock(pg->page_lock);
+    if (pg->ref_count) {
+      pg->ref_count--;
     }
-    pg->uncompressed = 0;
+    if (pg->ref_count == 0) {
+      if (pg->surf) {
+        cairo_surface_destroy(pg->surf);
+        pg->surf = NULL;
+      }
+      pg->uncompressed = 0;
+    }
+    g_mutex_unlock(pg->page_lock);
   }
 }
 
 PopplerAction *page_cache_get_action_from_pos(double x, double y) {
+  g_mutex_lock(_page_cache.data_lock);
+  g_mutex_lock(_page_cache.poppler_lock);
+  PopplerAction *ret = NULL;
   GList *tmp = _page_cache.page_links;
   UtilPoint pt = { x / _page_cache.current_scale, 
                    y / _page_cache.current_scale };
@@ -196,15 +300,23 @@ PopplerAction *page_cache_get_action_from_pos(double x, double y) {
     r.y1 = ((PopplerLinkMapping*)tmp->data)->area.y1;
     r.y2 = ((PopplerLinkMapping*)tmp->data)->area.y2;
     if (util_point_in_rect(&pt, &r)) {
-      return ((PopplerLinkMapping*)tmp->data)->action;
+      ret = ((PopplerLinkMapping*)tmp->data)->action;
+      g_mutex_unlock(_page_cache.poppler_lock);
+      g_mutex_unlock(_page_cache.data_lock);
+      return ret;
     }
     tmp = tmp->next;
   }
+  g_mutex_unlock(_page_cache.poppler_lock);
+  g_mutex_unlock(_page_cache.data_lock);
   return NULL;
 }
 
 PopplerDest *page_cache_get_named_dest(const gchar *dest) {
-  return poppler_document_find_dest(_page_cache.doc, dest);
+  g_mutex_lock(_page_cache.poppler_lock);
+  PopplerDest *d = poppler_document_find_dest(_page_cache.doc, dest);
+  g_mutex_unlock(_page_cache.poppler_lock);
+  return d;
 }
 
 struct _Page * _page_cache_get_page(int index) {
@@ -213,5 +325,101 @@ struct _Page * _page_cache_get_page(int index) {
   }
   return &_page_cache.pages[index];
 }
+
+int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *width, unsigned int *height) {
+  PopplerPage *page;
+  unsigned int w, h;
+  double ph, pw;
+  double scale;
+  cairo_t *c;
+  if (!surf) return 1;
+
+  g_mutex_lock(_page_cache.poppler_lock);
+  page = poppler_document_get_page(_page_cache.doc, index);
+  if (!page)
+    return 1;
+  poppler_page_get_size(page, &pw, &ph);
+  scale = _page_cache.scale_to_height / ph;
+  w = (unsigned int)(scale * pw + 0.75f);
+  h = (unsigned int)(scale * ph + 0.75f);
+
+  *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)w, (int)h);
+  if (!(*surf)) {
+    g_object_unref(page);
+    return 1;
+  }  
+
+  c = cairo_create(*surf);
+  if (!c) {
+    g_object_unref(page);
+    return 1;
+  }
+
+  cairo_scale(c, scale, scale);
+
+  cairo_set_source_rgb(c, 1.0f, 1.0f, 1.0f);
+  cairo_rectangle(c, 0, 0, w, h);
+  cairo_fill(c);
+
+  poppler_page_render(page, c);
+
+  cairo_destroy(c);
+  g_object_unref(page);
+
+  g_mutex_unlock(_page_cache.poppler_lock);
+
+  if (width) *width = w;
+  if (height) *height = h;
+
+  return 0;
+}
+
+int _page_cache_compress_page(int index) {
+  cairo_surface_t *pgsurf = NULL;
+  unsigned char *buffer = NULL;
+  unsigned int width, height, stride;
+  gsize bufsize;
+  struct _Page *pg = _page_cache_get_page(index);
+  if (!pg)
+    return 1;
+  if (_page_cache_render_page(index, &pgsurf, &width, &height) != 0) {
+    return 1;
+  }
+  stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+  bufsize = stride * height;
+
+  buffer = cairo_image_surface_get_data(pgsurf);
+  if (buffer) {
+    pg->compressed_buffer = g_malloc(bufsize);
+    pg->buffer_size = bufsize;
+    memcpy(pg->compressed_buffer, buffer, bufsize);
+    pg->compressed = 1;
+    pg->width = width;
+    pg->height = height;
+  }
+
+  cairo_surface_destroy(pgsurf);
+
+  return 0;
+}
+
+int _page_cache_uncompress_page(int index) {
+  struct _Page *pg = _page_cache_get_page(index);
+  unsigned char *buffer;
+  if (!pg)
+    return 1;
+  buffer = pg->compressed_buffer;
+  if (buffer) {
+    pg->surf = cairo_image_surface_create_for_data(buffer,
+                 CAIRO_FORMAT_ARGB32, pg->width, pg->height,
+                 cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, pg->width));
+    pg->uncompressed = 1;
+  }
+  else {
+    return 1;
+  }
+  return 0;
+}
+
 
 

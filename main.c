@@ -78,6 +78,8 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Error loading document\n");
     return 1;
   }
+  page_cache_start_caching();
+
   presentation_init(page_action_callback, NULL);
   i = presentation_get_current_page();
   page_cache_fetch_page(i, NULL, &w, &h, &_state.page_guess_split);
@@ -146,6 +148,7 @@ int main(int argc, char **argv) {
 
 void main_cleanup(void) {
   int i;
+  page_cache_stop_caching();
   page_cache_unload_document();
   for (i = 0; i < 2; i++) {
     if (GTK_IS_WINDOW(windows[i].win)) {
@@ -179,8 +182,14 @@ void main_cleanup(void) {
 #ifndef GDK_KEY_KP_Space
 #define GDK_KEY_KP_Space GDK_KP_Space
 #endif
+#ifndef GDK_KEY_space
+#define GDK_KEY_space GDK_space
+#endif
 #ifndef GDK_KEY_KP_Enter
 #define GDK_KEY_KP_Enter GDK_KP_Enter
+#endif
+#ifndef GDK_KEY_Return
+#define GDK_KEY_Return GDK_Return
 #endif
 #ifndef GDK_KEY_p
 #define GDK_KEY_p GDK_p
@@ -215,6 +224,8 @@ static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer
     case GDK_KEY_Down:
     case GDK_KEY_KP_Space:
     case GDK_KEY_KP_Enter:
+    case GDK_KEY_Return:
+    case GDK_KEY_space:
       presentation_page_next();
       break;
     case GDK_KEY_Home:
@@ -414,7 +425,9 @@ static void render_console_window(cairo_t *cr, int width, int height) {
 
   presentation_get_status(&pstate);
 
-  sprintf(buffer, "%d/%d, %s", pstate.current_page, pstate.num_pages, dbuf);
+  sprintf(buffer, "Cache: (%d/%d, %" G_GSIZE_FORMAT " bytes) %d/%d, %s", 
+      pstate.cached_pages, pstate.num_pages, pstate.cached_size,
+      pstate.current_page, pstate.num_pages, dbuf);
 
   cairo_set_source_rgb(cr, 1.0f, 1.0f, 1.0f);
   cairo_set_font_size(cr, 24);
