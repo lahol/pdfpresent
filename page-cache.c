@@ -3,6 +3,7 @@
 #include "utils.h"
 #include <cairo.h>
 #include <glib.h>
+#include <zlib.h>
 
 #define PAGE_STATE_CREATING_SURFACE      1
 #define PAGE_STATE_COMPRESSING           2
@@ -14,6 +15,7 @@ struct _Page {
   unsigned int height;
   cairo_surface_t *surf;
   unsigned char *compressed_buffer;
+  unsigned char *uncompressed_buffer;
   gsize buffer_size;
   GMutex *page_lock;
   unsigned int ref_count;
@@ -42,6 +44,8 @@ struct _Page * _page_cache_get_page(int index);
 int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *width, unsigned int *height);
 int _page_cache_compress_page(int index);
 int _page_cache_uncompress_page(int index);
+int _page_cache_compress_buffer(unsigned char *in, gsize insize, unsigned char **out, gsize *outsize);
+int _page_cache_uncompress_buffer(unsigned char *in, gsize insize, unsigned char **out, gsize outsize);
 
 int page_cache_load_document(const gchar *uri, double scale_to_height) {
   unsigned int i;
@@ -81,6 +85,8 @@ void page_cache_unload_document(void) {
       cairo_surface_destroy(_page_cache.pages[i].surf);
     if (_page_cache.pages[i].compressed_buffer)
       g_free(_page_cache.pages[i].compressed_buffer);
+    if (_page_cache.pages[i].uncompressed_buffer)
+      g_free(_page_cache.pages[i].uncompressed_buffer);
   }
   g_free(_page_cache.pages);
   if (_page_cache.control_lock)
@@ -157,7 +163,6 @@ gpointer _page_cache_caching_thread(gpointer data) {
       }
     }
   }
-  fprintf(stderr, "Exit caching thread\n");
   return NULL;
 }
 
@@ -279,6 +284,10 @@ void page_cache_page_unref(int index) {
         cairo_surface_destroy(pg->surf);
         pg->surf = NULL;
       }
+      if (pg->uncompressed_buffer) {
+        g_free(pg->uncompressed_buffer);
+        pg->uncompressed_buffer = NULL;
+      }
       pg->uncompressed = 0;
     }
     g_mutex_unlock(pg->page_lock);
@@ -390,9 +399,9 @@ int _page_cache_compress_page(int index) {
 
   buffer = cairo_image_surface_get_data(pgsurf);
   if (buffer) {
-    pg->compressed_buffer = g_malloc(bufsize);
-    pg->buffer_size = bufsize;
-    memcpy(pg->compressed_buffer, buffer, bufsize);
+    if (_page_cache_compress_buffer(buffer, bufsize, &pg->compressed_buffer, &pg->buffer_size) != 0) {
+      return 1;
+    }
     pg->compressed = 1;
     pg->width = width;
     pg->height = height;
@@ -405,14 +414,18 @@ int _page_cache_compress_page(int index) {
 
 int _page_cache_uncompress_page(int index) {
   struct _Page *pg = _page_cache_get_page(index);
-  unsigned char *buffer;
+  gsize bufsize;
+  unsigned int stride;
   if (!pg)
     return 1;
-  buffer = pg->compressed_buffer;
-  if (buffer) {
-    pg->surf = cairo_image_surface_create_for_data(buffer,
-                 CAIRO_FORMAT_ARGB32, pg->width, pg->height,
-                 cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, pg->width));
+  stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, pg->width);
+  bufsize = pg->height*stride;
+  if (_page_cache_uncompress_buffer(pg->compressed_buffer, pg->buffer_size, &pg->uncompressed_buffer, bufsize) != 0) {
+    return 1;
+  }
+  if (pg->uncompressed_buffer) {
+    pg->surf = cairo_image_surface_create_for_data(pg->uncompressed_buffer,
+                 CAIRO_FORMAT_ARGB32, pg->width, pg->height, stride);
     pg->uncompressed = 1;
   }
   else {
@@ -421,5 +434,79 @@ int _page_cache_uncompress_page(int index) {
   return 0;
 }
 
+int _page_cache_compress_buffer(unsigned char *in, gsize insize, unsigned char **out, gsize *outsize) {
+  int ret;
+  uLong bound;
+  unsigned char *obuf;
+  z_stream strm;
+
+  strm.zalloc = Z_NULL;
+  strm.zfree = Z_NULL;
+  strm.opaque = Z_NULL;
+  ret = deflateInit(&strm, 6);
+  if (ret != Z_OK)
+    return 1;
+  bound = deflateBound(&strm, insize);
+
+  obuf = g_malloc(bound);
+  strm.avail_in = insize;
+  strm.next_in = in;
+  strm.avail_out = bound;
+  strm.next_out = obuf;
+  ret = deflate(&strm, Z_FINISH);
+  if (ret == Z_STREAM_ERROR) {
+    g_free(obuf);
+    deflateEnd(&strm);
+    return 1;
+  }
+  *outsize = bound - strm.avail_out;
+  if (strm.avail_in != 0) {
+    g_free(obuf);
+    deflateEnd(&strm);
+    return 1;
+  }
+  *out = g_malloc(*outsize);
+  memcpy(*out, obuf, *outsize);
+  g_free(obuf);
+  deflateEnd(&strm);
+  
+  return 0;
+}
+
+int _page_cache_uncompress_buffer(unsigned char *in, gsize insize, unsigned char **out, gsize outsize) {
+  int ret;
+  z_stream strm;
+  
+  strm.zalloc = Z_NULL;
+  strm.zfree = Z_NULL;
+  strm.opaque = Z_NULL;
+  strm.avail_in = 0;
+  strm.next_in = Z_NULL;
+
+  ret = inflateInit(&strm);
+  if (ret != Z_OK) {
+    return 1;
+  }
+  *out = g_malloc(outsize);
+
+  strm.avail_in = insize;
+  strm.next_in = in;
+  strm.avail_out = outsize;
+  strm.next_out = *out;
+  ret = inflate(&strm, Z_NO_FLUSH);
+  if (ret == Z_STREAM_ERROR) {
+    g_free(*out);
+    inflateEnd(&strm);
+    return 1;
+  }
+  if (strm.avail_in != 0) {
+    g_free(*out);
+    inflateEnd(&strm);
+    return 1;
+  }
+  inflateEnd(&strm);
+
+  return 0;
+}
 
 
