@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall `pkg-config --cflags poppler poppler-glib poppler-cairo glib-2.0 gtk+-2.0 cairo`
+CFLAGS=-Wall -g `pkg-config --cflags poppler poppler-glib poppler-cairo glib-2.0 gtk+-2.0 cairo`
 LIBS=-lc -lz `pkg-config --libs poppler poppler-glib poppler-cairo glib-2.0 gthread-2.0 gtk+-2.0 cairo`
 
 all: pdfpresent

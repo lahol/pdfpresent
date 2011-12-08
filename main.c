@@ -517,13 +517,76 @@ static void page_action_callback(unsigned int action, void *data) {
   }
 }
 
-void main_read_config(int argc, char **argv) {
-  memset(&_config, 0, sizeof(struct _PresenterConfig));
-  if (argc > 1) {
-    _config.filename = g_strdup(argv[1]);
+gboolean _main_parse_option(const gchar *option_name, const gchar *value, gpointer data, GError **error) {
+  int val;
+  if (g_strcmp0(value, "yes") == 0 ||
+      g_strcmp0(value, "on") == 0 ||
+      g_strcmp0(value, "1") == 0)
+    val = 1;
+  else if (g_strcmp0(value, "off") == 0 ||
+      g_strcmp0(value, "no") == 0 ||
+      g_strcmp0(value, "0") == 0)
+    val = 0;
+  else if (g_strcmp0(value, "guess") == 0)
+    val = 2;
+  else if (value) {
+    return FALSE;
   }
+  if (g_strcmp0(option_name, "--console") == 0 ||
+      g_strcmp0(option_name, "-c") == 0) {
+    if (value)
+      _config.show_console = val;
+    else
+      _config.show_console = 1;
+  }
+  else if (g_strcmp0(option_name, "--notes") == 0 ||
+      g_strcmp0(option_name, "-n") == 0) {
+    if (value)
+      _config.force_notes = 2-val;
+    else
+      _config.force_notes = 0;
+  }
+  else {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static GOptionEntry entries[] = {
+    { "console", 'c', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Show console at startup", "value" },
+    { "notes", 'n', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Assume there are notes or not, guess value", "value" },
+    { "height", 'h', 0, G_OPTION_ARG_INT, &_config.scale_to_height, "Use pixmap of this height for prerendering", "N" }
+  };
+
+void main_read_config(int argc, char **argv) {
+  /* set defaults */
+  memset(&_config, 0, sizeof(struct _PresenterConfig));
   _config.show_console = 1;
+  _config.force_notes = 0;
   _config.scale_to_height = 768;
+
+  GError *error = NULL;;
+  GOptionContext *context = g_option_context_new("FILE - make two window presentations with presenter console");
+
+  g_option_context_add_main_entries(context, entries, NULL);
+  g_option_context_add_group(context, gtk_get_option_group(TRUE));
+  if (!g_option_context_parse(context, &argc, &argv, NULL)) {
+    fprintf(stderr, "option parsing failed: %s\n", error ? error->message : NULL);
+    g_option_context_free(context);
+    if (error)
+      g_error_free(error);
+    exit(1);
+  }
+
+  g_option_context_free(context);
+
+  if (argc <= 1) {
+    fprintf(stderr, "no filename given\n");
+    exit(1);
+  }
+
+  _config.filename = g_strdup(argv[1]);
+
 }
 
 void main_quit(void) {
