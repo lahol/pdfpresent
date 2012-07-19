@@ -342,26 +342,36 @@ int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *wid
   double ph, pw;
   double scale;
   cairo_t *c;
+/*  PopplerRectangle cropbox;*/
   if (!surf) return 1;
 
   g_mutex_lock(_page_cache.poppler_lock);
   page = poppler_document_get_page(_page_cache.doc, index);
-  if (!page)
+  if (!page) {
+    g_mutex_unlock(_page_cache.poppler_lock);
     return 1;
+  }
   poppler_page_get_size(page, &pw, &ph);
-  scale = _page_cache.scale_to_height / ph;
+  /* cut of one inch, did not affect working pdfs but fixed wrong margin on some tex-a4paper-pdf */
+  scale = _page_cache.scale_to_height / (ph-72);
+
+/*  poppler_page_get_crop_box(page, &cropbox);
+  fprintf(stderr, "cropbox: %f, %f, %f, %f\n", cropbox.x1, cropbox.y1, cropbox.x2, cropbox.y2);*/
+
   w = (unsigned int)(scale * pw + 0.75f);
   h = (unsigned int)(scale * ph + 0.75f);
 
   *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)w, (int)h);
   if (!(*surf)) {
     g_object_unref(page);
+    g_mutex_unlock(_page_cache.poppler_lock);
     return 1;
   }  
 
   c = cairo_create(*surf);
   if (!c) {
     g_object_unref(page);
+    g_mutex_unlock(_page_cache.poppler_lock);
     return 1;
   }
 
