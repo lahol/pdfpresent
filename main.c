@@ -14,6 +14,7 @@ static gboolean _expose_event(GtkWidget *widget, GdkEventExpose *event, gpointer
 static gboolean _delete_event(GtkWidget *widget, GdkEvent *event, gpointer data);
 static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gpointer data);
 static gboolean _motion_notify_event(GtkWidget *widget, GdkEventMotion *event, gpointer data);
+static gboolean _window_state_event(GtkWidget *widget, GdkEventWindowState *event, gpointer data);
 static void _window_realize(GtkWidget *widget, gpointer data);
 
 void render_window(unsigned int id);
@@ -23,6 +24,8 @@ void main_recalc_window_page_display(void);
 void main_reconfigure_windows(void);
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py);
 int main_page_to_window(unsigned int id, double px, double py, int *wx, int *wy);
+
+void toggle_fullscreen(guint win_id);
 
 static void page_action_callback(unsigned int action, void *data);
 
@@ -44,6 +47,7 @@ struct _Win {
     UtilRect bounds;
     double scale;
   } page_display;
+  unsigned int fullscreen : 1;
 } windows[2];
 
 struct _PresenterConfig {
@@ -120,6 +124,10 @@ int main(int argc, char **argv) {
     g_signal_connect(windows[i].win,
                      "delete-event",
                      G_CALLBACK(_delete_event),
+                     GUINT_TO_POINTER(i));
+    g_signal_connect(windows[i].win,
+                     "window-state-event",
+                     G_CALLBACK(_window_state_event),
                      GUINT_TO_POINTER(i));
     gtk_widget_set_app_paintable(windows[i].win, TRUE);
     gtk_window_set_default_size(GTK_WINDOW(windows[i].win), 800, 600);
@@ -242,6 +250,10 @@ static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer
       config_toggle_console();
       do_reconfigure = 1;
       break;
+    case GDK_KEY_f:
+      toggle_fullscreen(GPOINTER_TO_UINT(data));
+      do_reconfigure = 1;
+      break;
     case GDK_KEY_Escape:
       main_quit();
       break;
@@ -319,6 +331,15 @@ static gboolean _motion_notify_event(GtkWidget *widget, GdkEventMotion *event, g
   g_timer_start(hide_cursor_timer);
   if (!hide_cursor_source)
     hide_cursor_source = g_idle_add(main_check_mouse_motion, NULL);
+  return FALSE;
+}
+
+static gboolean _window_state_event(GtkWidget *widget, GdkEventWindowState *event, gpointer data) {
+  unsigned int id = GPOINTER_TO_UINT(data);
+  if (event->changed_mask & GDK_WINDOW_STATE_FULLSCREEN) {
+    windows[id].fullscreen = (event->new_window_state & GDK_WINDOW_STATE_FULLSCREEN) ? 1 : 0;
+    fprintf(stderr, "received state change, id: %d, fullscreen: %d\n", id, windows[id].fullscreen);
+  }
   return FALSE;
 }
 
@@ -644,5 +665,15 @@ gboolean main_check_mouse_motion(gpointer data) {
   return TRUE;
 }
 
+void toggle_fullscreen(guint win_id) {
+  if (win_id >= 2) {
+    return;
+  }
 
-
+  if (windows[win_id].fullscreen) {
+    gtk_window_unfullscreen(GTK_WINDOW(windows[win_id].win));
+  }
+  else {
+    gtk_window_fullscreen(GTK_WINDOW(windows[win_id].win));
+  }
+}
