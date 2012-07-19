@@ -338,7 +338,6 @@ static gboolean _window_state_event(GtkWidget *widget, GdkEventWindowState *even
   unsigned int id = GPOINTER_TO_UINT(data);
   if (event->changed_mask & GDK_WINDOW_STATE_FULLSCREEN) {
     windows[id].fullscreen = (event->new_window_state & GDK_WINDOW_STATE_FULLSCREEN) ? 1 : 0;
-    fprintf(stderr, "received state change, id: %d, fullscreen: %d\n", id, windows[id].fullscreen);
   }
   return FALSE;
 }

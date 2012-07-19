@@ -3,6 +3,7 @@
 #include <poppler.h>
 #include "utils.h"
 #include <string.h>
+#include <stdio.h>
 
 struct _Presentation {
   unsigned int current_index;
@@ -61,7 +62,7 @@ void presentation_page_last(void) {
 
 void presentation_page_goto(unsigned int index) {
   if (_presentation.current_index != index &&
-      index >= 0 && index <= _presentation.page_count -1) {
+      index <= _presentation.page_count -1) {
     page_cache_page_unref(_presentation.current_index);
     _presentation.current_index = index;
     page_cache_load_page(_presentation.current_index);
@@ -90,15 +91,16 @@ int presentation_perform_action_at(double x, double y) {
     return 1;
   }
   switch (action->type) {
+    default:
+      fprintf(stderr, "Currently unhandled action: %d\n",
+        action->type);
+      break;
     case POPPLER_ACTION_GOTO_DEST:
       _perform_action_goto_dest((PopplerActionGotoDest*)action);
       break;
     case POPPLER_ACTION_NAMED:
       _perform_action_named((PopplerActionNamed*)action);
       break;
-    default:
-      fprintf(stderr, "Currently unhandled action: %d\n",
-        action->type);
   }
   return 0;
 }

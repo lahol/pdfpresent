@@ -4,6 +4,7 @@
 #include <cairo.h>
 #include <glib.h>
 #include <zlib.h>
+#include <stdio.h>
 
 #define PAGE_STATE_CREATING_SURFACE      1
 #define PAGE_STATE_COMPRESSING           2
