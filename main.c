@@ -74,7 +74,6 @@ int main(int argc, char **argv) {
   unsigned int w, h;
 
   gtk_init(&argc, &argv);
-  g_thread_init(NULL);
 
   main_read_config(argc, argv);
 

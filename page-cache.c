@@ -18,7 +18,7 @@ struct _Page {
   unsigned char *compressed_buffer;
   unsigned char *uncompressed_buffer;
   gsize buffer_size;
-  GMutex *page_lock;
+  GMutex page_lock;
   unsigned int ref_count;
   unsigned int split_guess : 1;
   unsigned int compressed : 1;
@@ -27,9 +27,9 @@ struct _Page {
 
 struct _PageCache {
   PopplerDocument *doc;
-  GMutex *control_lock;
-  GMutex *data_lock;
-  GMutex *poppler_lock;
+  GMutex control_lock;
+  GMutex data_lock;
+  GMutex poppler_lock;
   GThread *cache_thread;
   unsigned int pages_cached;
   unsigned int npages;
@@ -66,13 +66,13 @@ int page_cache_load_document(const gchar *uri, double scale_to_height) {
   _page_cache.current_index = 0;
   _page_cache.scale_to_height = scale_to_height;
   _page_cache.npages = poppler_document_get_n_pages(_page_cache.doc);
-  _page_cache.control_lock = g_mutex_new();
-  _page_cache.data_lock = g_mutex_new();
-  _page_cache.poppler_lock = g_mutex_new();
+  g_mutex_init(&_page_cache.control_lock);
+  g_mutex_init(&_page_cache.data_lock);
+  g_mutex_init(&_page_cache.poppler_lock);
 
   _page_cache.pages = g_malloc0(sizeof(struct _Page)*_page_cache.npages);
   for (i = 0; i < _page_cache.npages; i++) {
-    _page_cache.pages[i].page_lock = g_mutex_new();
+    g_mutex_init(&_page_cache.pages[i].page_lock);
   }
   return 0;
 }
@@ -80,8 +80,7 @@ int page_cache_load_document(const gchar *uri, double scale_to_height) {
 void page_cache_unload_document(void) {
   unsigned int i;
   for (i = 0; i < _page_cache.npages && _page_cache.pages; i++) {
-    if (_page_cache.pages[i].page_lock)
-      g_mutex_free(_page_cache.pages[i].page_lock);
+    g_mutex_clear(&_page_cache.pages[i].page_lock);
     if (_page_cache.pages[i].surf)
       cairo_surface_destroy(_page_cache.pages[i].surf);
     if (_page_cache.pages[i].compressed_buffer)
@@ -90,12 +89,11 @@ void page_cache_unload_document(void) {
       g_free(_page_cache.pages[i].uncompressed_buffer);
   }
   g_free(_page_cache.pages);
-  if (_page_cache.control_lock)
-    g_mutex_free(_page_cache.control_lock);
-  if (_page_cache.data_lock)
-    g_mutex_free(_page_cache.data_lock);
-  if (_page_cache.poppler_lock)
-    g_mutex_free(_page_cache.poppler_lock);
+
+  g_mutex_clear(&_page_cache.control_lock);
+  g_mutex_clear(&_page_cache.data_lock);
+  g_mutex_clear(&_page_cache.poppler_lock);
+
   if (_page_cache.doc)
     g_object_unref(_page_cache.doc);
 }
@@ -111,9 +109,9 @@ void page_cache_get_status(PageCacheStatus *status) {
     status->page_count = _page_cache.npages;
     status->cached_size = 0;
     for (i = 0; i < status->page_count; i++) {
-      if (g_mutex_trylock(_page_cache.pages[i].page_lock)) {
+      if (g_mutex_trylock(&_page_cache.pages[i].page_lock)) {
         status->cached_size += _page_cache.pages[i].buffer_size;
-        g_mutex_unlock(_page_cache.pages[i].page_lock);
+        g_mutex_unlock(&_page_cache.pages[i].page_lock);
       }
     }
   }
@@ -125,12 +123,12 @@ gpointer _page_cache_caching_thread(gpointer data) {
   struct _Page *pg = NULL;
   int next;
   while (1) {
-    g_mutex_lock(_page_cache.control_lock);
+    g_mutex_lock(&_page_cache.control_lock);
     i = _page_cache.current_index + 1;
     if (_page_cache.pages_cached == _page_cache.npages)
       _page_cache.do_caching = 0;
     do_caching = _page_cache.do_caching;
-    g_mutex_unlock(_page_cache.control_lock);
+    g_mutex_unlock(&_page_cache.control_lock);
     if (!do_caching)
       break;
     next = 0;
@@ -140,10 +138,10 @@ gpointer _page_cache_caching_thread(gpointer data) {
       }
       pg = _page_cache_get_page(i);
       if (pg) {
-        g_mutex_lock(pg->page_lock);
+        g_mutex_lock(&pg->page_lock);
         if (!pg->compressed)
           next = 1;
-        g_mutex_unlock(pg->page_lock);
+        g_mutex_unlock(&pg->page_lock);
       }
       if (!next) {
         if (i == _page_cache.current_index)
@@ -154,13 +152,13 @@ gpointer _page_cache_caching_thread(gpointer data) {
     if (next) {
       pg = _page_cache_get_page(i);
       if (pg) {
-        g_mutex_lock(pg->page_lock);
+        g_mutex_lock(&pg->page_lock);
         if (_page_cache_compress_page(i) == 0) {
-          g_mutex_lock(_page_cache.control_lock);
+          g_mutex_lock(&_page_cache.control_lock);
           _page_cache.pages_cached++;
-          g_mutex_unlock(_page_cache.control_lock);
+          g_mutex_unlock(&_page_cache.control_lock);
         }
-        g_mutex_unlock(pg->page_lock);
+        g_mutex_unlock(&pg->page_lock);
       }
     }
   }
@@ -170,14 +168,13 @@ gpointer _page_cache_caching_thread(gpointer data) {
 void page_cache_start_caching(void) {
   _page_cache.do_caching = 1;
   _page_cache.cache_thread = 
-    g_thread_create(_page_cache_caching_thread,
-                    NULL, TRUE, NULL);
+    g_thread_new("PageCache", _page_cache_caching_thread, NULL);
 }
 
 void page_cache_stop_caching(void) {
-  g_mutex_lock(_page_cache.control_lock);
+  g_mutex_lock(&_page_cache.control_lock);
   _page_cache.do_caching = 0;
-  g_mutex_unlock(_page_cache.control_lock);
+  g_mutex_unlock(&_page_cache.control_lock);
   if (_page_cache.cache_thread)
     g_thread_join(_page_cache.cache_thread);
 }
@@ -191,8 +188,8 @@ int page_cache_load_page(int index) {
   }
   page_cache_page_reference(index);
   /* load links */
-  g_mutex_lock(_page_cache.data_lock);
-  g_mutex_lock(_page_cache.poppler_lock);
+  g_mutex_lock(&_page_cache.data_lock);
+  g_mutex_lock(&_page_cache.poppler_lock);
   if (_page_cache.page_links) {
     poppler_page_free_link_mapping(_page_cache.page_links);
     _page_cache.page_links = NULL;
@@ -204,11 +201,11 @@ int page_cache_load_page(int index) {
     _page_cache.current_scale = ph/h;
     g_object_unref(page);
   }
-  g_mutex_unlock(_page_cache.poppler_lock);
-  g_mutex_lock(_page_cache.control_lock);
+  g_mutex_unlock(&_page_cache.poppler_lock);
+  g_mutex_lock(&_page_cache.control_lock);
   _page_cache.current_index = index;
-  g_mutex_unlock(_page_cache.control_lock);
-  g_mutex_unlock(_page_cache.data_lock);
+  g_mutex_unlock(&_page_cache.control_lock);
+  g_mutex_unlock(&_page_cache.data_lock);
 
   return 0;
 }
@@ -221,7 +218,7 @@ int page_cache_fetch_page(int index, cairo_surface_t **surf, unsigned int *width
   /* if surface exists (and is set) get surface */
   /* else if compressed exists, uncompress, get surface */
   /* else init width, height, surface (render) */
-  g_mutex_lock(pg->page_lock);
+  g_mutex_lock(&pg->page_lock);
   if (pg->uncompressed && pg->surf) {
     if (surf) *surf = pg->surf;
     if (width) *width = pg->width;
@@ -229,7 +226,7 @@ int page_cache_fetch_page(int index, cairo_surface_t **surf, unsigned int *width
   }
   else if (pg->compressed && pg->compressed_buffer) {
     if (_page_cache_uncompress_page(index) != 0) {
-      g_mutex_unlock(pg->page_lock);
+      g_mutex_unlock(&pg->page_lock);
       fprintf(stderr, "could not uncompress page\n");
       return 1;
     }
@@ -239,7 +236,7 @@ int page_cache_fetch_page(int index, cairo_surface_t **surf, unsigned int *width
   }
   else {
     if (_page_cache_render_page(index, &pg->surf, &pg->width, &pg->height) != 0) {
-      g_mutex_unlock(pg->page_lock);
+      g_mutex_unlock(&pg->page_lock);
       fprintf(stderr, "render page return non null\n");
       return 1;
     }
@@ -260,23 +257,23 @@ int page_cache_fetch_page(int index, cairo_surface_t **surf, unsigned int *width
   pg->split_guess = (pg->width > 2*pg->height ? 1 : 0);
   if (guess_split) *guess_split = pg->split_guess;
 
-  g_mutex_unlock(pg->page_lock);
+  g_mutex_unlock(&pg->page_lock);
   return 0;
 }
 
 void page_cache_page_reference(int index) {
   struct _Page *pg = _page_cache_get_page(index);
   if (pg) {
-    g_mutex_lock(pg->page_lock);
+    g_mutex_lock(&pg->page_lock);
     pg->ref_count++;
-    g_mutex_unlock(pg->page_lock);
+    g_mutex_unlock(&pg->page_lock);
   }
 }
 
 void page_cache_page_unref(int index) {
   struct _Page *pg = _page_cache_get_page(index);
   if (pg) {
-    g_mutex_lock(pg->page_lock);
+    g_mutex_lock(&pg->page_lock);
     if (pg->ref_count) {
       pg->ref_count--;
     }
@@ -291,13 +288,13 @@ void page_cache_page_unref(int index) {
       }
       pg->uncompressed = 0;
     }
-    g_mutex_unlock(pg->page_lock);
+    g_mutex_unlock(&pg->page_lock);
   }
 }
 
 PopplerAction *page_cache_get_action_from_pos(double x, double y) {
-  g_mutex_lock(_page_cache.data_lock);
-  g_mutex_lock(_page_cache.poppler_lock);
+  g_mutex_lock(&_page_cache.data_lock);
+  g_mutex_lock(&_page_cache.poppler_lock);
   PopplerAction *ret = NULL;
   GList *tmp = _page_cache.page_links;
   UtilPoint pt = { x / _page_cache.current_scale, 
@@ -311,21 +308,21 @@ PopplerAction *page_cache_get_action_from_pos(double x, double y) {
     r.y2 = ((PopplerLinkMapping*)tmp->data)->area.y2;
     if (util_point_in_rect(&pt, &r)) {
       ret = ((PopplerLinkMapping*)tmp->data)->action;
-      g_mutex_unlock(_page_cache.poppler_lock);
-      g_mutex_unlock(_page_cache.data_lock);
+      g_mutex_unlock(&_page_cache.poppler_lock);
+      g_mutex_unlock(&_page_cache.data_lock);
       return ret;
     }
     tmp = tmp->next;
   }
-  g_mutex_unlock(_page_cache.poppler_lock);
-  g_mutex_unlock(_page_cache.data_lock);
+  g_mutex_unlock(&_page_cache.poppler_lock);
+  g_mutex_unlock(&_page_cache.data_lock);
   return NULL;
 }
 
 PopplerDest *page_cache_get_named_dest(const gchar *dest) {
-  g_mutex_lock(_page_cache.poppler_lock);
+  g_mutex_lock(&_page_cache.poppler_lock);
   PopplerDest *d = poppler_document_find_dest(_page_cache.doc, dest);
-  g_mutex_unlock(_page_cache.poppler_lock);
+  g_mutex_unlock(&_page_cache.poppler_lock);
   return d;
 }
 
@@ -345,10 +342,10 @@ int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *wid
 /*  PopplerRectangle cropbox;*/
   if (!surf) return 1;
 
-  g_mutex_lock(_page_cache.poppler_lock);
+  g_mutex_lock(&_page_cache.poppler_lock);
   page = poppler_document_get_page(_page_cache.doc, index);
   if (!page) {
-    g_mutex_unlock(_page_cache.poppler_lock);
+    g_mutex_unlock(&_page_cache.poppler_lock);
     return 1;
   }
   poppler_page_get_size(page, &pw, &ph);
@@ -364,14 +361,14 @@ int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *wid
   *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)w, (int)h);
   if (!(*surf)) {
     g_object_unref(page);
-    g_mutex_unlock(_page_cache.poppler_lock);
+    g_mutex_unlock(&_page_cache.poppler_lock);
     return 1;
   }  
 
   c = cairo_create(*surf);
   if (!c) {
     g_object_unref(page);
-    g_mutex_unlock(_page_cache.poppler_lock);
+    g_mutex_unlock(&_page_cache.poppler_lock);
     return 1;
   }
 
@@ -386,7 +383,7 @@ int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *wid
   cairo_destroy(c);
   g_object_unref(page);
 
-  g_mutex_unlock(_page_cache.poppler_lock);
+  g_mutex_unlock(&_page_cache.poppler_lock);
 
   if (width) *width = w;
   if (height) *height = h;
@@ -519,5 +516,3 @@ int _page_cache_uncompress_buffer(unsigned char *in, gsize insize, unsigned char
 
   return 0;
 }
-
-
