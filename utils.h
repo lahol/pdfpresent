@@ -9,15 +9,15 @@ void g_list_free_full(GList *list, GDestroyNotify free_func);
 #endif
 
 typedef struct _UtilRect {
-  double x1;
-  double y1;
-  double x2;
-  double y2;
+    double x1;
+    double y1;
+    double x2;
+    double y2;
 } UtilRect;
 
 typedef struct _UtilPoint {
-  double x;
-  double y;
+    double x;
+    double y;
 } UtilPoint;
 
 gchar *util_make_uri(const gchar *file);

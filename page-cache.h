@@ -6,9 +6,9 @@
 #include <poppler.h>
 
 typedef struct _PageCacheStatus {
-  unsigned int pages_cached;
-  unsigned int page_count;
-  gsize cached_size;
+    unsigned int pages_cached;
+    unsigned int page_count;
+    gsize cached_size;
 } PageCacheStatus;
 
 int page_cache_load_document(const gchar *uri, double scale_to_height);

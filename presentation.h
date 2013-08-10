@@ -16,15 +16,15 @@
 #define PRESENTATION_ACTION_QUIT                        10
 
 typedef struct _PresentationStatus {
-  unsigned int current_page;
-  unsigned int num_pages;
-  unsigned int cached_pages;
-  gsize cached_size;
+    unsigned int current_page;
+    unsigned int num_pages;
+    unsigned int cached_pages;
+    gsize cached_size;
 } PresentationStatus;
 
 void presentation_init(
-                void (*cb)(unsigned int, void*), 
-                void *userdata);
+    void (*cb)(unsigned int, void *),
+    void *userdata);
 unsigned int presentation_get_current_page(void);
 void presentation_page_next(void);
 void presentation_page_prev(void);
