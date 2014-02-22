@@ -1,25 +1,31 @@
-CC=clang
-CFLAGS=-Wall -g `pkg-config --cflags poppler poppler-glib poppler-cairo glib-2.0 gtk+-2.0 cairo`
-LIBS=-lc -lz `pkg-config --libs poppler poppler-glib poppler-cairo glib-2.0 gthread-2.0 gtk+-2.0 cairo`
+CC=gcc
+PKG_CONFIG=pkg-config
+INSTALL=install
+
+CFLAGS=-Wall -g `$(PKG_CONFIG) --cflags poppler poppler-glib poppler-cairo glib-2.0 gtk+-2.0 cairo`
+LIBS=-lc -lz `$(PKG_CONFIG) --libs poppler poppler-glib poppler-cairo glib-2.0 gthread-2.0 gtk+-2.0 cairo`
+
+PREFIX := /usr
+
+present_SRC := $(wildcard *.c)
+present_OBJ := $(present_SRC:.c=.o)
+present_HEADERS := $(wildcard *.h)
 
 all: pdfpresent
 
-pdfpresent: main.o page-cache.o presentation.o utils.o
-	$(CC) $(CFLAGS) -o pdfpresent main.o page-cache.o presentation.o utils.o $(LIBS)
+pdfpresent: $(present_OBJ)
+	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
-main.o: main.c utils.h page-cache.h presentation.h
-	$(CC) $(CFLAGS) -c -o main.o main.c
+%.o: %.c $(present_HEADERS)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-page-cache.o: page-cache.c page-cache.h utils.h
-	$(CC) $(CFLAGS) -c -o page-cache.o page-cache.c
+install: pdfpresent
+	$(INSTALL) pdfpresent $(PREFIX)/bin
 
-presentation.o: presentation.c presentation.h page-cache.h utils.h
-	$(CC) $(CFLAGS) -c -o presentation.o presentation.c
-
-utils.o: utils.h utils.c
-	$(CC) $(CFLAGS) -c -o utils.o utils.c
+uninstall:
+	rm $(PREFIX)/bin/pdfpresent
 
 clean:
-	rm -f pdfpresent
-	rm -f *.o
+	rm -f pdfpresent $(present_OBJ)
 
+.PHONY: all clean install uninstall
