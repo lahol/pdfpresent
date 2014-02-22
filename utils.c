@@ -49,7 +49,7 @@ gchar *util_make_uri(const gchar *file)
                 current = g_stpcpy(current, G_DIR_SEPARATOR_S);
             }
         }
-        current = g_stpcpy(current, file);
+        /*current =*/ g_stpcpy(current, file);
         return buf;
     }
     else {
