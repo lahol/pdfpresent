@@ -2,8 +2,8 @@ CC=gcc
 PKG_CONFIG=pkg-config
 INSTALL=install
 
-CFLAGS=-Wall -g `$(PKG_CONFIG) --cflags poppler poppler-glib poppler-cairo glib-2.0 gtk+-2.0 cairo`
-LIBS=-lc -lz `$(PKG_CONFIG) --libs poppler poppler-glib poppler-cairo glib-2.0 gthread-2.0 gtk+-2.0 cairo`
+CFLAGS=-Wall -g `$(PKG_CONFIG) --cflags poppler poppler-glib poppler-cairo glib-2.0 gtk+-3.0 cairo`
+LIBS=-lc -lz `$(PKG_CONFIG) --libs poppler poppler-glib poppler-cairo glib-2.0 gthread-2.0 gtk+-3.0 cairo`
 
 PREFIX := /usr
 

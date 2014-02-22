@@ -10,14 +10,14 @@
 
 static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer data);
 static gboolean _configure_event(GtkWidget *widget, GdkEventConfigure *event, gpointer data);
-static gboolean _expose_event(GtkWidget *widget, GdkEventExpose *event, gpointer data);
+static gboolean _draw_event(GtkWidget *widget, cairo_t *cr, gpointer data);
 static gboolean _delete_event(GtkWidget *widget, GdkEvent *event, gpointer data);
 static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gpointer data);
 static gboolean _motion_notify_event(GtkWidget *widget, GdkEventMotion *event, gpointer data);
 static gboolean _window_state_event(GtkWidget *widget, GdkEventWindowState *event, gpointer data);
 static void _window_realize(GtkWidget *widget, gpointer data);
 
-void render_window(unsigned int id);
+void render_window(unsigned int id, cairo_t *cr);
 static void render_presentation_window(cairo_t *cr, int width, int height);
 static void render_console_window(cairo_t *cr, int width, int height);
 void main_recalc_window_page_display(void);
@@ -98,8 +98,8 @@ int main(int argc, char **argv)
             return 1;
         }
         g_signal_connect(windows[i].win,
-                         "expose-event",
-                         G_CALLBACK(_expose_event),
+                         "draw",
+                         G_CALLBACK(_draw_event),
                          GUINT_TO_POINTER(i));
         g_signal_connect(windows[i].win,
                          "configure-event",
@@ -170,9 +170,9 @@ void main_cleanup(void)
     if (hide_cursor_source)
         g_source_remove(hide_cursor_source);
     if (hand_cursor)
-        gdk_cursor_unref(hand_cursor);
+        g_object_unref(G_OBJECT(hand_cursor));
     if (blank_cursor)
-        gdk_cursor_unref(blank_cursor);
+        g_object_unref(G_OBJECT(blank_cursor));
 }
 
 /* be downwards comaptible */
@@ -286,9 +286,9 @@ static gboolean _configure_event(GtkWidget *widget, GdkEventConfigure *event, gp
     return FALSE;
 }
 
-static gboolean _expose_event(GtkWidget *widget, GdkEventExpose *event, gpointer data)
+static gboolean _draw_event(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
-    render_window(GPOINTER_TO_UINT(data));
+    render_window(GPOINTER_TO_UINT(data), cr);
 
     return FALSE;
 }
@@ -331,10 +331,10 @@ static gboolean _motion_notify_event(GtkWidget *widget, GdkEventMotion *event, g
         }
     }
     if (found_link) {
-        gdk_window_set_cursor(widget->window, hand_cursor);
+        gdk_window_set_cursor(gtk_widget_get_window(widget), hand_cursor);
     }
     else {
-        gdk_window_set_cursor(widget->window, NULL);
+        gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
     }
     if (!hide_cursor_timer)
         hide_cursor_timer = g_timer_new();
@@ -355,21 +355,19 @@ static gboolean _window_state_event(GtkWidget *widget, GdkEventWindowState *even
 
 static void _window_realize(GtkWidget *widget, gpointer data)
 {
-    gdk_window_set_events(widget->window,
-                          gdk_window_get_events(widget->window) |
+    gdk_window_set_events(gtk_widget_get_window(widget),
+                          gdk_window_get_events(gtk_widget_get_window(widget)) |
                           GDK_BUTTON_PRESS_MASK |
                           GDK_POINTER_MOTION_MASK);
 }
 
-void render_window(unsigned int id)
+void render_window(unsigned int id, cairo_t *cr)
 {
-    cairo_t *cr;
-
     if (id != 0 && id != 1) {
         return;
     }
-    cr = gdk_cairo_create(windows[id].win->window);
-    if (!cr) return;
+    if (cr == NULL)
+        return;
 
     cairo_set_source_rgb(cr, 0, 0, 0);
     cairo_rectangle(cr, 0, 0, windows[id].cx, windows[id].cy);
@@ -378,8 +376,6 @@ void render_window(unsigned int id)
     if (windows[id].render) {
         windows[id].render(cr, windows[id].cx, windows[id].cy);
     }
-
-    cairo_destroy(cr);
 }
 
 static void render_presentation_window(cairo_t *cr, int width, int height)
@@ -684,8 +680,8 @@ gboolean main_check_mouse_motion(gpointer data)
         g_timer_stop(hide_cursor_timer);
         g_timer_reset(hide_cursor_timer);
         hide_cursor_source = 0;
-        gdk_window_set_cursor(windows[0].win->window, blank_cursor);
-        gdk_window_set_cursor(windows[1].win->window, blank_cursor);
+        gdk_window_set_cursor(gtk_widget_get_window(windows[0].win), blank_cursor);
+        gdk_window_set_cursor(gtk_widget_get_window(windows[1].win), blank_cursor);
         return FALSE;
     }
     return TRUE;
