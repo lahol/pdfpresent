@@ -228,6 +228,7 @@ static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer
     switch (event->keyval) {
         case GDK_KEY_Left:
         case GDK_KEY_Up:
+        case GDK_KEY_Prior:
             presentation_page_prev();
             break;
         case GDK_KEY_Right:
@@ -236,6 +237,7 @@ static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer
         case GDK_KEY_KP_Enter:
         case GDK_KEY_Return:
         case GDK_KEY_space:
+        case GDK_KEY_Next:
             presentation_page_next();
             break;
         case GDK_KEY_Home:
@@ -256,7 +258,8 @@ static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer
             toggle_fullscreen(GPOINTER_TO_UINT(data));
             do_reconfigure = 1;
             break;
-        case GDK_KEY_Escape:
+/*        case GDK_KEY_Escape:*/
+        case GDK_KEY_q:
             main_quit();
             break;
     }
