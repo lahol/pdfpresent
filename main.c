@@ -38,6 +38,8 @@ void main_quit(void);
 gboolean main_regular_update(gpointer data);
 gboolean main_check_mouse_motion(gpointer data);
 
+void main_reload_document(void);
+
 struct _Win {
     GtkWidget *win;
     gint cx;
@@ -56,6 +58,7 @@ struct _PresenterConfig {
     unsigned int force_notes : 2; /* override guess, 1: override, show, 2: override, don't show, 0: use guess */
     unsigned int show_console : 1;
     unsigned int show_preview : 1;
+    unsigned int disable_cache : 1;
 } _config;
 
 struct _PresenterState {
@@ -78,11 +81,19 @@ int main(int argc, char **argv)
 
     main_read_config(argc, argv);
 
-    if (page_cache_load_document(_config.filename, _config.scale_to_height) != 0) {
+    if (page_cache_init() != 0) {
+        fprintf(stderr, "Failed to initialize page cache\n");
+        return 1;
+    }
+
+    if (page_cache_load_document(_config.filename) != 0) {
         fprintf(stderr, "Error loading document\n");
         return 1;
     }
-    page_cache_start_caching();
+    page_cache_set_scale_to_height(_config.scale_to_height);
+
+    if (_config.disable_cache == 0)
+        page_cache_start_caching();
 
     presentation_init(page_action_callback, NULL);
     i = presentation_get_current_page();
@@ -158,7 +169,7 @@ void main_cleanup(void)
 {
     int i;
     page_cache_stop_caching();
-    page_cache_unload_document();
+    page_cache_cleanup();
     for (i = 0; i < 2; i++) {
         if (GTK_IS_WINDOW(windows[i].win)) {
             gtk_widget_destroy(windows[i].win);
@@ -257,6 +268,9 @@ static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer
         case GDK_KEY_f:
             toggle_fullscreen(GPOINTER_TO_UINT(data));
             do_reconfigure = 1;
+            break;
+        case GDK_KEY_r:
+            main_reload_document();
             break;
 /*        case GDK_KEY_Escape:*/
         case GDK_KEY_q:
@@ -427,27 +441,25 @@ static void render_console_window(cairo_t *cr, int width, int height)
     PresentationStatus pstate;
 
     index = presentation_get_current_page();
-    if (page_cache_fetch_page(index, &page_surface, &w, &h, &guess_split) != 0) {
-        fprintf(stderr, "could not fetch page %d\n", index);
-        return;
+    if (page_cache_fetch_page(index, &page_surface, &w, &h, &guess_split) == 0) {
+        if ((guess_split && _config.force_notes == 0) || _config.force_notes == 1) {
+            w /= 2;
+            page_offset = -((double)w);
+        }
+        scale = ((double)width)/((double)w);
+        tmp = ((double)height)/((double)h);
+        if (tmp < scale) scale = tmp;
+        scale *= 0.8f;
+
+        cairo_get_matrix(cr, &m);
+        cairo_scale(cr, scale, scale);
+
+        cairo_set_source_surface(cr, page_surface, page_offset, 0.0f);
+        cairo_rectangle(cr, 0.0f, 0.0f, w, h);
+        cairo_fill(cr);
+
+        cairo_set_matrix(cr, &m);
     }
-    if ((guess_split && _config.force_notes == 0) || _config.force_notes == 1) {
-        w /= 2;
-        page_offset = -((double)w);
-    }
-    scale = ((double)width)/((double)w);
-    tmp = ((double)height)/((double)h);
-    if (tmp < scale) scale = tmp;
-    scale *= 0.8f;
-
-    cairo_get_matrix(cr, &m);
-    cairo_scale(cr, scale, scale);
-
-    cairo_set_source_surface(cr, page_surface, page_offset, 0.0f);
-    cairo_rectangle(cr, 0.0f, 0.0f, w, h);
-    cairo_fill(cr);
-
-    cairo_set_matrix(cr, &m);
 
     /* render time */
     time(&tval);
@@ -581,6 +593,9 @@ gboolean _main_parse_option(const gchar *option_name, const gchar *value, gpoint
         else
             _config.force_notes = 0;
     }
+    else if (g_strcmp0(option_name, "--no-cache") == 0) {
+        _config.disable_cache = 1;
+    }
     else {
         return FALSE;
     }
@@ -590,7 +605,8 @@ gboolean _main_parse_option(const gchar *option_name, const gchar *value, gpoint
 static GOptionEntry entries[] = {
     { "console", 'c', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Show console at startup", "value" },
     { "notes", 'n', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Assume there are notes or not, guess value", "value" },
-    { "height", 'h', 0, G_OPTION_ARG_INT, &_config.scale_to_height, "Use pixmap of this height for prerendering", "N" }
+    { "height", 'h', 0, G_OPTION_ARG_INT, &_config.scale_to_height, "Use pixmap of this height for prerendering", "N" },
+    { "no-cache", 0, G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Do not cache pages", NULL }
 };
 
 void main_read_config(int argc, char **argv)
@@ -685,6 +701,16 @@ gboolean main_check_mouse_motion(gpointer data)
         return FALSE;
     }
     return TRUE;
+}
+
+void main_reload_document(void)
+{
+    page_cache_stop_caching();
+    page_cache_unload_document();
+
+    page_cache_load_document(_config.filename);
+    if (_config.disable_cache == 0)
+        page_cache_start_caching();
 }
 
 void toggle_fullscreen(guint win_id)

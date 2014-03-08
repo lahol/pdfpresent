@@ -48,11 +48,21 @@ int _page_cache_uncompress_page(int index);
 int _page_cache_compress_buffer(unsigned char *in, gsize insize, unsigned char **out, gsize *outsize);
 int _page_cache_uncompress_buffer(unsigned char *in, gsize insize, unsigned char **out, gsize outsize);
 
-int page_cache_load_document(const gchar *uri, double scale_to_height)
+int page_cache_init(void)
+{
+    memset(&_page_cache, 0, sizeof(struct _PageCache));
+
+    g_mutex_init(&_page_cache.control_lock);
+    g_mutex_init(&_page_cache.data_lock);
+    g_mutex_init(&_page_cache.poppler_lock);
+
+    return 0;
+}
+
+int page_cache_load_document(const gchar *uri)
 {
     unsigned int i;
     gchar *_uri;
-    memset(&_page_cache, 0, sizeof(struct _PageCache));
     if (!uri) {
         return 1;
     }
@@ -65,11 +75,7 @@ int page_cache_load_document(const gchar *uri, double scale_to_height)
     }
 
     _page_cache.current_index = 0;
-    _page_cache.scale_to_height = scale_to_height;
     _page_cache.npages = poppler_document_get_n_pages(_page_cache.doc);
-    g_mutex_init(&_page_cache.control_lock);
-    g_mutex_init(&_page_cache.data_lock);
-    g_mutex_init(&_page_cache.poppler_lock);
 
     _page_cache.pages = g_malloc0(sizeof(struct _Page)*_page_cache.npages);
     for (i = 0; i < _page_cache.npages; i++) {
@@ -78,7 +84,12 @@ int page_cache_load_document(const gchar *uri, double scale_to_height)
     return 0;
 }
 
-void page_cache_unload_document(void)
+void page_cache_set_scale_to_height(double scale_to_height)
+{
+    _page_cache.scale_to_height = scale_to_height;
+}
+
+void page_cache_clear_cache(void)
 {
     unsigned int i;
     for (i = 0; i < _page_cache.npages && _page_cache.pages; i++) {
@@ -91,13 +102,35 @@ void page_cache_unload_document(void)
             g_free(_page_cache.pages[i].uncompressed_buffer);
     }
     g_free(_page_cache.pages);
+    _page_cache.pages = NULL;
+
+    _page_cache.pages_cached = 0;
+}
+
+void page_cache_unload_document(void)
+{
+    if (_page_cache.page_links) {
+        poppler_page_free_link_mapping(_page_cache.page_links);
+        _page_cache.page_links = NULL;
+    }
+
+    page_cache_clear_cache();
+
+    if (_page_cache.doc)
+        g_object_unref(_page_cache.doc);
+
+    _page_cache.doc = NULL;
+
+    _page_cache.npages = 0;
+}
+
+void page_cache_cleanup(void)
+{
+    page_cache_unload_document();
 
     g_mutex_clear(&_page_cache.control_lock);
     g_mutex_clear(&_page_cache.data_lock);
     g_mutex_clear(&_page_cache.poppler_lock);
-
-    if (_page_cache.doc)
-        g_object_unref(_page_cache.doc);
 }
 
 unsigned int page_cache_get_page_count(void)
@@ -167,6 +200,7 @@ gpointer _page_cache_caching_thread(gpointer data)
             }
         }
     }
+    _page_cache.cache_thread = NULL;
     return NULL;
 }
 
@@ -342,7 +376,7 @@ PopplerDest *page_cache_get_named_dest(const gchar *dest)
 
 struct _Page *_page_cache_get_page(int index)
 {
-    if (index < 0 || index >= _page_cache.npages) {
+    if (index < 0 || index >= _page_cache.npages || _page_cache.pages == NULL || _page_cache.doc == NULL) {
         return NULL;
     }
     return &_page_cache.pages[index];
@@ -356,6 +390,8 @@ int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *wid
     double scale;
     cairo_t *c;
     /*  PopplerRectangle cropbox;*/
+    if (_page_cache.doc == NULL)
+        return 1;
     if (!surf) return 1;
 
     g_mutex_lock(&_page_cache.poppler_lock);

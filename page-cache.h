@@ -11,8 +11,13 @@ typedef struct _PageCacheStatus {
     gsize cached_size;
 } PageCacheStatus;
 
-int page_cache_load_document(const gchar *uri, double scale_to_height);
+int page_cache_init(void);
+void page_cache_cleanup(void);
+int page_cache_load_document(const gchar *uri);
 void page_cache_unload_document(void);
+
+void page_cache_set_scale_to_height(double scale_to_height);
+
 unsigned int page_cache_get_page_count(void);
 void page_cache_get_status(PageCacheStatus *status);
 void page_cache_start_caching(void);
