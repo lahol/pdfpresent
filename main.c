@@ -40,6 +40,10 @@ gboolean main_check_mouse_motion(gpointer data);
 
 void main_reload_document(void);
 
+void main_file_monitor_start(void);
+void main_file_monitor_cleanup(void);
+void main_file_monitor_cb(GFileMonitor *monitor, GFile *first, GFile *second, GFileMonitorEvent event, gpointer data);
+
 struct _Win {
     GtkWidget *win;
     gint cx;
@@ -65,6 +69,8 @@ struct _PresenterState {
     double page_width;
     double page_height;
     int page_guess_split;
+    GFile *document;
+    GFileMonitor *monitor;
 } _state;
 
 GdkCursor *hand_cursor = NULL;
@@ -90,6 +96,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "Error loading document\n");
         return 1;
     }
+
+    main_file_monitor_start();
+
     page_cache_set_scale_to_height(_config.scale_to_height);
 
     if (_config.disable_cache == 0)
@@ -168,6 +177,8 @@ int main(int argc, char **argv)
 void main_cleanup(void)
 {
     int i;
+    main_file_monitor_cleanup();
+
     page_cache_stop_caching();
     page_cache_cleanup();
     for (i = 0; i < 2; i++) {
@@ -687,6 +698,12 @@ gboolean main_regular_update(gpointer data)
     return TRUE;
 }
 
+void main_update(void)
+{
+    gtk_widget_queue_draw(windows[0].win);
+    gtk_widget_queue_draw(windows[1].win);
+}
+
 gboolean main_check_mouse_motion(gpointer data)
 {
     if (!blank_cursor)
@@ -711,6 +728,8 @@ void main_reload_document(void)
     page_cache_load_document(_config.filename);
     if (_config.disable_cache == 0)
         page_cache_start_caching();
+
+    main_update();
 }
 
 void toggle_fullscreen(guint win_id)
@@ -724,5 +743,39 @@ void toggle_fullscreen(guint win_id)
     }
     else {
         gtk_window_fullscreen(GTK_WINDOW(windows[win_id].win));
+    }
+}
+
+void main_file_monitor_start(void)
+{
+    gchar *uri = util_make_uri(_config.filename);
+    if (uri == NULL)
+        return;
+    _state.document = g_file_new_for_uri(uri);
+    g_free(uri);
+
+    _state.monitor = g_file_monitor(_state.document, G_FILE_MONITOR_SEND_MOVED, NULL, NULL);
+    if (_state.monitor == NULL)
+        return;
+
+    g_signal_connect(_state.monitor, "changed", G_CALLBACK(main_file_monitor_cb), NULL);
+}
+
+void main_file_monitor_cleanup(void)
+{
+    if (_state.monitor)
+        g_object_unref(_state.monitor);
+    if (_state.document)
+        g_object_unref(_state.document);
+
+    _state.monitor = NULL;
+    _state.document = NULL;
+}
+
+void main_file_monitor_cb(GFileMonitor *monitor, GFile *first, GFile *second, GFileMonitorEvent event, gpointer data)
+{
+    /* TODO: Handle move; change: start timer to reload if changes_done_hint isn’t there yet */
+    if (event == G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT) {
+        main_reload_document();
     }
 }
