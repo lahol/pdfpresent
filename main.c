@@ -197,53 +197,6 @@ void main_cleanup(void)
         g_object_unref(G_OBJECT(blank_cursor));
 }
 
-/* be downwards comaptible */
-#ifndef GDK_KEY_Left
-#define GDK_KEY_Left GDK_Left
-#endif
-#ifndef GDK_KEY_Right
-#define GDK_KEY_Right GDK_Right
-#endif
-#ifndef GDK_KEY_Down
-#define GDK_KEY_Down GDK_Down
-#endif
-#ifndef GDK_KEY_Up
-#define GDK_KEY_Up GDK_Up
-#endif
-#ifndef GDK_KEY_KP_Space
-#define GDK_KEY_KP_Space GDK_KP_Space
-#endif
-#ifndef GDK_KEY_space
-#define GDK_KEY_space GDK_space
-#endif
-#ifndef GDK_KEY_KP_Enter
-#define GDK_KEY_KP_Enter GDK_KP_Enter
-#endif
-#ifndef GDK_KEY_Return
-#define GDK_KEY_Return GDK_Return
-#endif
-#ifndef GDK_KEY_p
-#define GDK_KEY_p GDK_p
-#endif
-#ifndef GDK_KEY_n
-#define GDK_KEY_n GDK_n
-#endif
-#ifndef GDK_KEY_c
-#define GDK_KEY_c GDK_c
-#endif
-#ifndef GDK_KEY_Escape
-#define GDK_KEY_Escape GDK_Escape
-#endif
-#ifndef GDK_KEY_d
-#define GDK_KEY_d GDK_d
-#endif
-#ifndef GDK_KEY_Home
-#define GDK_KEY_Home GDK_Home
-#endif
-#ifndef GDK_KEY_End
-#define GDK_KEY_End GDK_End
-#endif
-
 static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
 {
     int do_reconfigure = 0;
