@@ -13,6 +13,7 @@ static gboolean _configure_event(GtkWidget *widget, GdkEventConfigure *event, gp
 static gboolean _draw_event(GtkWidget *widget, cairo_t *cr, gpointer data);
 static gboolean _delete_event(GtkWidget *widget, GdkEvent *event, gpointer data);
 static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gpointer data);
+static gboolean _scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer data);
 static gboolean _motion_notify_event(GtkWidget *widget, GdkEventMotion *event, gpointer data);
 static gboolean _window_state_event(GtkWidget *widget, GdkEventWindowState *event, gpointer data);
 static void _window_realize(GtkWidget *widget, gpointer data);
@@ -132,6 +133,10 @@ int main(int argc, char **argv)
         g_signal_connect(windows[i].win,
                          "button-press-event",
                          G_CALLBACK(_button_press_event),
+                         GUINT_TO_POINTER(i));
+        g_signal_connect(windows[i].win,
+                         "scroll-event",
+                         G_CALLBACK(_scroll_event),
                          GUINT_TO_POINTER(i));
         g_signal_connect(windows[i].win,
                          "motion-notify-event",
@@ -282,7 +287,7 @@ static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gp
     unsigned int id = GPOINTER_TO_UINT(data);
     double px, py;
     int found_link = 0;
-    if (main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
+    if (event->button == 1 && main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
         if (presentation_perform_action_at(px, py) == 0) {
             found_link = 1;
         }
@@ -295,6 +300,15 @@ static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gp
             presentation_page_prev();
         }
     }
+    return FALSE;
+}
+
+static gboolean _scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer data)
+{
+    if (event->direction == GDK_SCROLL_UP)
+        presentation_page_prev();
+    else if (event->direction == GDK_SCROLL_DOWN)
+        presentation_page_next();
     return FALSE;
 }
 
@@ -336,7 +350,8 @@ static void _window_realize(GtkWidget *widget, gpointer data)
     gdk_window_set_events(gtk_widget_get_window(widget),
                           gdk_window_get_events(gtk_widget_get_window(widget)) |
                           GDK_BUTTON_PRESS_MASK |
-                          GDK_POINTER_MOTION_MASK);
+                          GDK_POINTER_MOTION_MASK |
+                          GDK_SCROLL_MASK);
 }
 
 void render_window(unsigned int id, cairo_t *cr)
