@@ -25,6 +25,7 @@ typedef struct _PresentationStatus {
 void presentation_init(
     void (*cb)(unsigned int, void *),
     void *userdata);
+void presentation_update(void);
 unsigned int presentation_get_current_page(void);
 void presentation_page_next(void);
 void presentation_page_prev(void);

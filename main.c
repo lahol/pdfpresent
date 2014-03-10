@@ -682,7 +682,7 @@ void main_reload_document(void)
     if (_config.disable_cache == 0)
         page_cache_start_caching();
 
-    main_update();
+    presentation_update();
 }
 
 void toggle_fullscreen(guint win_id)

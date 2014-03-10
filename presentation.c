@@ -23,6 +23,16 @@ void presentation_init(void (*cb)(unsigned int, void *), void *userdata)
     page_cache_load_page(_presentation.current_index);
 }
 
+void presentation_update(void)
+{
+    _presentation.page_count = page_cache_get_page_count();
+    if (_presentation.current_index >= _presentation.page_count)
+        _presentation.current_index = _presentation.page_count - 1;
+
+    page_cache_load_page(_presentation.current_index);
+    _presentation_call_action_cb(PRESENTATION_ACTION_PAGE_CHANGED);
+}
+
 unsigned int presentation_get_current_page(void)
 {
     return _presentation.current_index;
