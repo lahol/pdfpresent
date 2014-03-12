@@ -32,6 +32,7 @@ static void page_action_callback(unsigned int action, void *data);
 
 void main_read_config(int argc, char **argv);
 void config_step_notes(void);
+void config_step_preview(void);
 void config_toggle_console(void);
 void main_cleanup(void);
 void main_quit(void);
@@ -241,6 +242,9 @@ static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer
         case GDK_KEY_r:
             main_reload_document();
             break;
+        case GDK_KEY_p:
+            config_step_preview();
+            break;
 /*        case GDK_KEY_Escape:*/
         case GDK_KEY_q:
             main_quit();
@@ -287,7 +291,8 @@ static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gp
     unsigned int id = GPOINTER_TO_UINT(data);
     double px, py;
     int found_link = 0;
-    if (event->button == 1 && main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
+    /* TODO: Handle preview pages correctly */
+    if (!_config.show_preview && event->button == 1 && main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
         if (presentation_perform_action_at(px, py) == 0) {
             found_link = 1;
         }
@@ -317,7 +322,7 @@ static gboolean _motion_notify_event(GtkWidget *widget, GdkEventMotion *event, g
     unsigned int id = GPOINTER_TO_UINT(data);
     int found_link = 0;
     double px, py;
-    if (main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
+    if (!_config.show_preview && main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
         if (page_cache_get_action_from_pos(px, py)) {
             found_link = 1;
         }
@@ -420,10 +425,11 @@ static void render_console_window(cairo_t *cr, int width, int height)
     PresentationStatus pstate;
 
     index = presentation_get_current_page();
-    if (page_cache_fetch_page(index, &page_surface, &w, &h, &guess_split) == 0) {
+    if (page_cache_fetch_page(index + (_config.show_preview ? 1 : 0), &page_surface, &w, &h, &guess_split) == 0) {
         if ((guess_split && _config.force_notes == 0) || _config.force_notes == 1) {
             w /= 2;
-            page_offset = -((double)w);
+            if (!_config.show_preview)
+                page_offset = -((double)w);
         }
         scale = ((double)width)/((double)w);
         tmp = ((double)height)/((double)h);
@@ -470,7 +476,7 @@ int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py)
     else {
         dw = _state.page_width;
     }
-    if (id == 0 || (id == 1 && !_config.show_console)) {
+    if (id == 0 || (id == 1 && (!_config.show_console || _config.show_preview))) {
         scale = ((double)windows[id].cx)/dw;
         tmp = ((double)windows[id].cy)/_state.page_height;
         if (tmp < scale) scale = tmp;
@@ -575,6 +581,13 @@ gboolean _main_parse_option(const gchar *option_name, const gchar *value, gpoint
     else if (g_strcmp0(option_name, "--no-cache") == 0) {
         _config.disable_cache = 1;
     }
+    else if (g_strcmp0(option_name, "--preview") == 0 ||
+             g_strcmp0(option_name, "-p") == 0) {
+        if (value)
+            _config.show_preview = val;
+        else
+            _config.show_preview = 1;
+    }
     else {
         return FALSE;
     }
@@ -584,6 +597,7 @@ gboolean _main_parse_option(const gchar *option_name, const gchar *value, gpoint
 static GOptionEntry entries[] = {
     { "console", 'c', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Show console at startup", "value" },
     { "notes", 'n', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Assume there are notes or not, guess value", "value" },
+    { "preview", 'p', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Show preview of next slide", "value" },
     { "height", 'h', 0, G_OPTION_ARG_INT, &_config.scale_to_height, "Use pixmap of this height for prerendering", "N" },
     { "no-cache", 0, G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Do not cache pages", NULL }
 };
@@ -649,6 +663,12 @@ void config_step_notes(void)
     else {
         _config.force_notes++;
     }
+    main_reconfigure_windows();
+}
+
+void config_step_preview(void)
+{
+    _config.show_preview = !_config.show_preview;
     main_reconfigure_windows();
 }
 
