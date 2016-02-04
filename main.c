@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <memory.h>
 #include "page-cache.h"
+#include "page-overview.h"
 #include "presentation.h"
 #include "utils.h"
 #include <time.h>
@@ -75,6 +76,8 @@ struct _PresenterConfig {
     unsigned int show_console : 1;
     unsigned int show_preview : 1;
     unsigned int disable_cache : 1;
+    guint overview_columns;
+    guint overview_rows;
 } _config;
 
 struct _PresenterState {
@@ -126,6 +129,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "Error loading document\n");
         return 1;
     }
+
+    page_overview_init(_config.overview_columns, _config.overview_rows);
+    page_overview_update();
 
     main_file_monitor_start();
 
@@ -213,6 +219,8 @@ void main_cleanup(void)
 {
     int i;
     main_file_monitor_cleanup();
+
+    page_overview_cleanup();
 
     page_cache_stop_caching();
     page_cache_cleanup();
@@ -427,6 +435,15 @@ static void render_console_window(cairo_t *cr, int width, int height)
 
 static void render_overview_window(cairo_t *cr, int width, int height)
 {
+    guint col, row;
+    page_overview_get_selection(&row, &col);
+    cairo_set_source_rgb(cr, 1.0f, 0.0f, 0.0f);
+
+    double w = ((double)width)/((double)_config.overview_columns);
+    double h = ((double)height)/((double)_config.overview_rows);
+
+    cairo_rectangle(cr, col * w, row * h, w, h);
+    cairo_stroke(cr);
 }
 
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py)
@@ -574,6 +591,8 @@ void main_read_config(int argc, char **argv)
     _config.show_console = 1;
     _config.force_notes = 0;
     _config.scale_to_height = 768;
+    _config.overview_columns = 4;
+    _config.overview_rows = 3;
 
     GError *error = NULL;;
     GOptionContext *context = g_option_context_new("FILE - make two window presentations with presenter console");
@@ -845,12 +864,16 @@ gboolean mode_overview_handle_key_press(GtkWidget *widget, GdkEventKey *event, g
             main_set_mode(PRESENTATION_MODE_NORMAL);
             break;
         case GDK_KEY_Left:
+            page_overview_move(-1, 0);
             break;
         case GDK_KEY_Right:
+            page_overview_move(1, 0);
             break;
         case GDK_KEY_Down:
+            page_overview_move(0, 1);
             break;
         case GDK_KEY_Up:
+            page_overview_move(0, -1);
             break;
         case GDK_KEY_Return:
         case GDK_KEY_KP_Enter:
