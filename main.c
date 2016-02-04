@@ -21,6 +21,7 @@ static void _window_realize(GtkWidget *widget, gpointer data);
 void render_window(unsigned int id, cairo_t *cr);
 static void render_presentation_window(cairo_t *cr, int width, int height);
 static void render_console_window(cairo_t *cr, int width, int height);
+static void render_overview_window(cairo_t *cr, int width, int height);
 void main_recalc_window_page_display(void);
 void main_reconfigure_windows(void);
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py);
@@ -46,11 +47,20 @@ void main_file_monitor_start(void);
 void main_file_monitor_cleanup(void);
 void main_file_monitor_cb(GFileMonitor *monitor, GFile *first, GFile *second, GFileMonitorEvent event, gpointer data);
 
+void main_init_modes(void);
+
+enum WindowMode {
+    WINDOW_MODE_PRESENTATION = 0,
+    WINDOW_MODE_CONSOLE,
+    WINDOW_MODE_OVERVIEW
+};
+
 struct _Win {
     GtkWidget *win;
     gint cx;
     gint cy;
     void (*render)(cairo_t *, int, int);
+    enum WindowMode window_mode;
     struct {
         UtilRect bounds;
         double scale;
@@ -75,6 +85,23 @@ struct _PresenterState {
     GFileMonitor *monitor;
 } _state;
 
+struct _PresentationMode {
+    void (*handle_reconfigure)(void);
+    gboolean (*handle_key_press)(GtkWidget *, GdkEventKey *, gpointer);
+    gboolean (*handle_button_press)(GtkWidget *, GdkEventButton *, gpointer);
+};
+
+enum _PresentationModeType {
+    PRESENTATION_MODE_NORMAL = 0,
+    PRESENTATION_MODE_OVERVIEW,
+    N_PRESENTATION_MODES
+};
+
+struct _PresentationMode mode_class[N_PRESENTATION_MODES];
+enum _PresentationModeType current_mode;
+
+void main_set_mode(enum _PresentationModeType mode);
+
 GdkCursor *hand_cursor = NULL;
 GdkCursor *blank_cursor = NULL;
 guint hide_cursor_source = 0;
@@ -87,6 +114,7 @@ int main(int argc, char **argv)
 
     gtk_init(&argc, &argv);
 
+    main_init_modes();
     main_read_config(argc, argv);
 
     if (page_cache_init() != 0) {
@@ -166,7 +194,8 @@ int main(int argc, char **argv)
     gtk_widget_show_all(windows[0].win);
     gtk_widget_show_all(windows[1].win);
 
-    hand_cursor = gdk_cursor_new(GDK_HAND2);
+    hand_cursor = /*gdk_cursor_new(GDK_HAND2);*/
+        gdk_cursor_new_from_name(gdk_display_get_default(), "pointer");
 
     g_timeout_add_seconds(1, (GSourceFunc)main_regular_update, NULL);
     hide_cursor_timer = g_timer_new();
@@ -205,58 +234,7 @@ void main_cleanup(void)
 
 static gboolean _key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
 {
-    int do_reconfigure = 0;
-    switch (event->keyval) {
-        case GDK_KEY_Left:
-        case GDK_KEY_Up:
-        case GDK_KEY_Prior:
-            presentation_page_prev();
-            break;
-        case GDK_KEY_Right:
-        case GDK_KEY_Down:
-        case GDK_KEY_KP_Space:
-        case GDK_KEY_KP_Enter:
-        case GDK_KEY_Return:
-        case GDK_KEY_space:
-        case GDK_KEY_Next:
-            presentation_page_next();
-            break;
-        case GDK_KEY_Home:
-            presentation_page_first();
-            break;
-        case GDK_KEY_End:
-            presentation_page_last();
-            break;
-        case GDK_KEY_n:
-            config_step_notes();
-            do_reconfigure = 1;
-            break;
-        case GDK_KEY_c:
-            config_toggle_console();
-            do_reconfigure = 1;
-            break;
-        case GDK_KEY_f:
-            toggle_fullscreen(GPOINTER_TO_UINT(data));
-            do_reconfigure = 1;
-            break;
-        case GDK_KEY_r:
-            main_reload_document();
-            break;
-        case GDK_KEY_p:
-            config_step_preview();
-            break;
-/*        case GDK_KEY_Escape:*/
-        case GDK_KEY_q:
-            main_quit();
-            break;
-    }
-
-    if (do_reconfigure) {
-        gtk_widget_queue_draw(windows[0].win);
-        gtk_widget_queue_draw(windows[1].win);
-    }
-
-    return FALSE;
+    return mode_class[current_mode].handle_key_press(widget, event, data);
 }
 
 static gboolean _configure_event(GtkWidget *widget, GdkEventConfigure *event, gpointer data)
@@ -288,24 +266,7 @@ static gboolean _delete_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 
 static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gpointer data)
 {
-    unsigned int id = GPOINTER_TO_UINT(data);
-    double px, py;
-    int found_link = 0;
-    /* TODO: Handle preview pages correctly */
-    if (!_config.show_preview && event->button == 1 && main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
-        if (presentation_perform_action_at(px, py) == 0) {
-            found_link = 1;
-        }
-    }
-    if (!found_link) {
-        if (event->button == 1) {
-            presentation_page_next();
-        }
-        else if (event->button == 3) {
-            presentation_page_prev();
-        }
-    }
-    return FALSE;
+    return mode_class[current_mode].handle_button_press(widget, event, data);
 }
 
 static gboolean _scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer data)
@@ -462,6 +423,10 @@ static void render_console_window(cairo_t *cr, int width, int height)
     cairo_text_extents(cr, buffer, &ext);
     cairo_move_to(cr, width-ext.x_advance, height+ext.y_bearing);
     cairo_show_text(cr, buffer);
+}
+
+static void render_overview_window(cairo_t *cr, int width, int height)
+{
 }
 
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py)
@@ -641,13 +606,7 @@ void main_quit(void)
 
 void main_reconfigure_windows(void)
 {
-    windows[0].render = render_presentation_window;
-    if (_config.show_console) {
-        windows[1].render = render_console_window;
-    }
-    else {
-        windows[1].render = render_presentation_window;
-    }
+    mode_class[current_mode].handle_reconfigure();
 }
 
 void main_recalc_window_page_display(void)
@@ -695,7 +654,8 @@ void main_update(void)
 gboolean main_check_mouse_motion(gpointer data)
 {
     if (!blank_cursor)
-        blank_cursor = gdk_cursor_new(GDK_BLANK_CURSOR);
+        blank_cursor = /*gdk_cursor_new(GDK_BLANK_CURSOR);*/
+            gdk_cursor_new_from_name(gdk_display_get_default(), "none");
     gdouble elapsed = g_timer_elapsed(hide_cursor_timer, NULL);
     if (elapsed > 3) {
         g_timer_stop(hide_cursor_timer);
@@ -766,4 +726,187 @@ void main_file_monitor_cb(GFileMonitor *monitor, GFile *first, GFile *second, GF
     if (event == G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT) {
         main_reload_document();
     }
+}
+
+void mode_normal_reconfigure_windows(void)
+{
+    windows[0].render = render_presentation_window;
+    windows[0].window_mode = WINDOW_MODE_PRESENTATION;
+    if (_config.show_console) {
+        windows[1].render = render_console_window;
+        windows[1].window_mode = WINDOW_MODE_CONSOLE;
+    }
+    else {
+        windows[1].render = render_presentation_window;
+        windows[1].window_mode = WINDOW_MODE_OVERVIEW;
+    }
+}
+
+gboolean mode_normal_handle_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data)
+{
+    int do_reconfigure = 0;
+    switch (event->keyval) {
+        case GDK_KEY_Left:
+        case GDK_KEY_Up:
+        case GDK_KEY_Prior:
+            presentation_page_prev();
+            break;
+        case GDK_KEY_Right:
+        case GDK_KEY_Down:
+        case GDK_KEY_KP_Space:
+        case GDK_KEY_KP_Enter:
+        case GDK_KEY_Return:
+        case GDK_KEY_space:
+        case GDK_KEY_Next:
+            presentation_page_next();
+            break;
+        case GDK_KEY_Home:
+            presentation_page_first();
+            break;
+        case GDK_KEY_End:
+            presentation_page_last();
+            break;
+        case GDK_KEY_n:
+            config_step_notes();
+            do_reconfigure = 1;
+            break;
+        case GDK_KEY_c:
+            config_toggle_console();
+            do_reconfigure = 1;
+            break;
+        case GDK_KEY_f:
+            toggle_fullscreen(GPOINTER_TO_UINT(data));
+            do_reconfigure = 1;
+            break;
+        case GDK_KEY_r:
+            main_reload_document();
+            break;
+        case GDK_KEY_p:
+            config_step_preview();
+            break;
+/*        case GDK_KEY_Escape:*/
+        case GDK_KEY_q:
+            main_quit();
+            break;
+        case GDK_KEY_Tab:
+            main_set_mode(PRESENTATION_MODE_OVERVIEW);
+            break;
+    }
+
+    if (do_reconfigure) {
+        gtk_widget_queue_draw(windows[0].win);
+        gtk_widget_queue_draw(windows[1].win);
+    }
+
+    return FALSE;
+}
+
+gboolean mode_normal_handle_button_press(GtkWidget *widget, GdkEventButton *event, gpointer data)
+{
+    unsigned int id = GPOINTER_TO_UINT(data);
+    double px, py;
+    int found_link = 0;
+    /* TODO: Handle preview pages correctly */
+    if (!_config.show_preview && event->button == 1 && main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
+        if (presentation_perform_action_at(px, py) == 0) {
+            found_link = 1;
+        }
+    }
+    if (!found_link) {
+        if (event->button == 1) {
+            presentation_page_next();
+        }
+        else if (event->button == 3) {
+            presentation_page_prev();
+        }
+    }
+    return FALSE;
+}
+
+void mode_overview_reconfigure_windows(void)
+{
+    windows[1].render = render_overview_window;
+    windows[1].window_mode = WINDOW_MODE_OVERVIEW;
+
+    if (_config.show_console) {
+        windows[0].render = render_presentation_window;
+        windows[0].window_mode = WINDOW_MODE_PRESENTATION;
+    }
+    else {
+        windows[0].render = render_overview_window;
+        windows[0].window_mode = WINDOW_MODE_OVERVIEW;
+    }
+}
+
+gboolean mode_overview_handle_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data)
+{
+    switch (event->keyval) {
+        case GDK_KEY_Tab:
+            main_set_mode(PRESENTATION_MODE_NORMAL);
+            break;
+        case GDK_KEY_Left:
+            break;
+        case GDK_KEY_Right:
+            break;
+        case GDK_KEY_Down:
+            break;
+        case GDK_KEY_Up:
+            break;
+        case GDK_KEY_Return:
+        case GDK_KEY_KP_Enter:
+            break;
+        case GDK_KEY_Home:
+            break;
+        case GDK_KEY_End:
+            break;
+        case GDK_KEY_f:
+            toggle_fullscreen(GPOINTER_TO_UINT(data));
+            break;
+        case GDK_KEY_r:
+            main_reload_document();
+            break;
+        case GDK_KEY_q:
+            main_quit();
+            break;
+        default:
+            break;
+    }
+
+    gtk_widget_queue_draw(windows[0].win);
+    gtk_widget_queue_draw(windows[1].win);
+
+    return FALSE;
+}
+
+gboolean mode_overview_handle_button_press(GtkWidget *widget, GdkEventButton *event, gpointer data)
+{
+    return FALSE;
+}
+
+void main_set_mode(enum _PresentationModeType mode)
+{
+    if (current_mode == mode)
+        return;
+    current_mode = mode;
+    main_reconfigure_windows();
+
+    gtk_widget_queue_draw(windows[0].win);
+    gtk_widget_queue_draw(windows[1].win);
+}
+
+void main_init_modes(void)
+{
+    mode_class[PRESENTATION_MODE_NORMAL].handle_reconfigure =
+        mode_normal_reconfigure_windows;
+    mode_class[PRESENTATION_MODE_NORMAL].handle_key_press =
+        mode_normal_handle_key_press;
+    mode_class[PRESENTATION_MODE_NORMAL].handle_button_press =
+        mode_normal_handle_button_press;
+
+    mode_class[PRESENTATION_MODE_OVERVIEW].handle_reconfigure =
+        mode_overview_reconfigure_windows;
+    mode_class[PRESENTATION_MODE_OVERVIEW].handle_key_press =
+        mode_overview_handle_key_press;
+    mode_class[PRESENTATION_MODE_OVERVIEW].handle_button_press =
+        mode_overview_handle_button_press;
 }

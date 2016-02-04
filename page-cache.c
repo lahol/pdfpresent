@@ -238,6 +238,9 @@ int page_cache_load_page(int index)
     }
     page = poppler_document_get_page(_page_cache.doc, index);
     if (page) {
+        gchar *label = poppler_page_get_label(page);
+        fprintf(stderr, "page_cache_load_page, label: %s\n", label);
+        g_free(label);
         _page_cache.page_links = poppler_page_get_link_mapping(page);
         poppler_page_get_size(page, NULL, &h);
         _page_cache.current_scale = ph/h;
@@ -400,6 +403,9 @@ int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *wid
         g_mutex_unlock(&_page_cache.poppler_lock);
         return 1;
     }
+    gchar *label = poppler_page_get_label(page);
+    fprintf(stderr, "page_cache_render_page, label: %s\n", label);
+    g_free(label);
     poppler_page_get_size(page, &pw, &ph);
     /* cut of one inch, did not affect working pdfs but fixed wrong margin on some tex-a4paper-pdf */
     scale = _page_cache.scale_to_height / (ph-72);
