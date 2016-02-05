@@ -140,6 +140,30 @@ gboolean page_overview_get_page(guint row, guint column, gint *index, gchar **la
 void page_overview_set_page(gint index)
 {
     /* find page belonging to index (or, if no match, page before that = first of group) */
+    /* binary search; but find index equal or smaller than key */
+    if (page_overview.page_count == 0)
+        return;
+
+    guint l = 0;
+    guint u = page_overview.page_count - 1;
+    guint i = 0;
+    while (1) {
+        i = (l + u)/2;
+        if (index == page_overview.grid[i].index || l >= u)
+            break;
+        if (index < page_overview.grid[i].index)
+            u = i > 0 ? i - 1 : 0;
+        else if (index > page_overview.grid[i].index)
+            l = i + 1;
+    }
+
+    if (index < page_overview.grid[i].index && i > 0)
+        --i;
+
+    page_overview.current_row = i / page_overview.columns;
+    page_overview.current_column = i % page_overview.columns;
+    
+    _page_overview_update_offset();
 }
 
 void page_overview_enum_labels_cb(gchar *label, gint index, GList **list)

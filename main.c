@@ -924,6 +924,7 @@ gboolean mode_normal_handle_key_press(GtkWidget *widget, GdkEventKey *event, gpo
             main_quit();
             break;
         case GDK_KEY_Tab:
+            page_overview_set_page(presentation_get_current_page());
             main_set_mode(PRESENTATION_MODE_OVERVIEW);
             break;
     }
@@ -977,6 +978,7 @@ gboolean mode_overview_handle_key_press(GtkWidget *widget, GdkEventKey *event, g
 {
     switch (event->keyval) {
         case GDK_KEY_Tab:
+        case GDK_KEY_Escape:
             main_set_mode(PRESENTATION_MODE_NORMAL);
             break;
         case GDK_KEY_Left:
@@ -993,6 +995,12 @@ gboolean mode_overview_handle_key_press(GtkWidget *widget, GdkEventKey *event, g
             break;
         case GDK_KEY_Return:
         case GDK_KEY_KP_Enter:
+            {
+                gint page_index = page_overview_get_selection(NULL, NULL);
+                presentation_page_goto(page_index);
+
+                main_set_mode(PRESENTATION_MODE_NORMAL);
+            }
             break;
         case GDK_KEY_Home:
             break;
