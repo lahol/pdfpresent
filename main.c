@@ -130,7 +130,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    page_overview_init(_config.overview_columns, _config.overview_rows);
+    page_overview_init(_config.overview_columns);
     page_overview_update();
 
     main_file_monitor_start();

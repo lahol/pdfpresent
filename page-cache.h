@@ -29,6 +29,10 @@ void page_cache_page_unref(int index);
 PopplerAction *page_cache_get_action_from_pos(double x, double y);
 PopplerDest *page_cache_get_named_dest(const gchar *dest);
 
+/* label, index of first page, userdata */
+typedef void (*PageCacheEnumLabelsProc)(gchar *, gint, gpointer);
+void page_cache_enum_labels(PageCacheEnumLabelsProc callback, gpointer userdata);
+
 /* get action rects for page */
 
 #endif

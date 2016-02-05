@@ -3,8 +3,9 @@
 
 #include <glib.h>
 
-void page_overview_init(guint columns, guint rows);
+void page_overview_init(guint columns);
 void page_overview_cleanup(void);
+void page_overview_set_display_rows(guint display_rows);
 void page_overview_move(gint dx, gint dy);
 gint page_overview_get_selection(guint *row, guint *column);
 

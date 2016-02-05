@@ -84,6 +84,35 @@ int page_cache_load_document(const gchar *uri)
     return 0;
 }
 
+void page_cache_enum_labels(PageCacheEnumLabelsProc callback, gpointer userdata)
+{
+    if (!callback || !_page_cache.doc)
+        return;
+
+    PopplerPage *page;
+    gchar *last_label = NULL;
+    gchar *label = NULL;
+    gint index;
+
+    for (index = 0; index < _page_cache.npages; ++index) {
+        page = poppler_document_get_page(_page_cache.doc, index);
+        if (page) {
+            label = poppler_page_get_label(page);
+            if (g_strcmp0(label, last_label) != 0 || label == NULL) {
+                callback(label, index, userdata);
+                g_free(last_label);
+                last_label = label;
+            }
+            else {
+                g_free(label);
+                label = NULL;
+            }
+        }
+    }
+
+    g_free(label);
+}
+
 void page_cache_set_scale_to_height(double scale_to_height)
 {
     _page_cache.scale_to_height = scale_to_height;
@@ -238,9 +267,6 @@ int page_cache_load_page(int index)
     }
     page = poppler_document_get_page(_page_cache.doc, index);
     if (page) {
-        gchar *label = poppler_page_get_label(page);
-        fprintf(stderr, "page_cache_load_page, label: %s\n", label);
-        g_free(label);
         _page_cache.page_links = poppler_page_get_link_mapping(page);
         poppler_page_get_size(page, NULL, &h);
         _page_cache.current_scale = ph/h;
@@ -403,9 +429,6 @@ int _page_cache_render_page(int index, cairo_surface_t **surf, unsigned int *wid
         g_mutex_unlock(&_page_cache.poppler_lock);
         return 1;
     }
-    gchar *label = poppler_page_get_label(page);
-    fprintf(stderr, "page_cache_render_page, label: %s\n", label);
-    g_free(label);
     poppler_page_get_size(page, &pw, &ph);
     /* cut of one inch, did not affect working pdfs but fixed wrong margin on some tex-a4paper-pdf */
     scale = _page_cache.scale_to_height / (ph-72);
