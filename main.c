@@ -345,47 +345,57 @@ void render_window(unsigned int id, cairo_t *cr)
     }
 }
 
-static void render_presentation_window(cairo_t *cr, int width, int height)
+void main_render_page(cairo_t *cr, int index, int width, int height, int show_part, gboolean do_center)
 {
+    cairo_save(cr);
+
     cairo_surface_t *page_surface;
     unsigned int w, h;
-    unsigned int index;
     double scale, tmp;
-    double ox, oy;
+    double ox = 0.0f, oy = 0.0f;
+    double page_offset = 0.0f;
     int guess_split;
 
-    index = presentation_get_current_page();
     if (page_cache_fetch_page(index, &page_surface, &w, &h, &guess_split) != 0) {
         fprintf(stderr, "could not fetch page %d\n", index);
-        return;
+        goto done;
     }
+
     if ((guess_split && _config.force_notes == 0) || _config.force_notes == 1) {
         w /= 2;
+        if (!_config.show_preview && show_part == 1)
+            page_offset = -((double)w);
     }
+
     scale = ((double)width)/((double)w);
     tmp = ((double)height)/((double)h);
     if (tmp < scale) scale = tmp;
 
-    ox = (width-scale*w)*0.5f;
-    oy = (height-scale*h)*0.5f;
+    if (do_center) {
+        ox = (width - scale * w) * 0.5f;
+        oy = (height - scale * h) * 0.5f;
+    }
 
     cairo_translate(cr, ox, oy);
     cairo_scale(cr, scale, scale);
 
-    cairo_set_source_surface(cr, page_surface, 0.0f, 0.0f);
+    cairo_set_source_surface(cr, page_surface, page_offset, 0.0f);
     cairo_rectangle(cr, 0.0f, 0.0f, w, h);
     cairo_fill(cr);
+
+done:
+
+    cairo_restore(cr);
+}
+
+static void render_presentation_window(cairo_t *cr, int width, int height)
+{
+    main_render_page(cr, presentation_get_current_page(),
+                     width, height, 0, TRUE);
 }
 
 static void render_console_window(cairo_t *cr, int width, int height)
 {
-    cairo_surface_t *page_surface;
-    unsigned int w, h;
-    unsigned int index;
-    double scale, tmp;
-    double page_offset = 0.0f;
-    int guess_split;
-    cairo_matrix_t m;
     time_t tval;
     struct tm *curtval;
     char dbuf[256];
@@ -393,27 +403,8 @@ static void render_console_window(cairo_t *cr, int width, int height)
     cairo_text_extents_t ext;
     PresentationStatus pstate;
 
-    index = presentation_get_current_page();
-    if (page_cache_fetch_page(index + (_config.show_preview ? 1 : 0), &page_surface, &w, &h, &guess_split) == 0) {
-        if ((guess_split && _config.force_notes == 0) || _config.force_notes == 1) {
-            w /= 2;
-            if (!_config.show_preview)
-                page_offset = -((double)w);
-        }
-        scale = ((double)width)/((double)w);
-        tmp = ((double)height)/((double)h);
-        if (tmp < scale) scale = tmp;
-        scale *= 0.8f;
-
-        cairo_get_matrix(cr, &m);
-        cairo_scale(cr, scale, scale);
-
-        cairo_set_source_surface(cr, page_surface, page_offset, 0.0f);
-        cairo_rectangle(cr, 0.0f, 0.0f, w, h);
-        cairo_fill(cr);
-
-        cairo_set_matrix(cr, &m);
-    }
+    main_render_page(cr, presentation_get_current_page() + (_config.show_preview ? 1 : 0),
+                         (int)(width * 0.8), (int)(height * 0.8), 1, FALSE);
 
     /* render time */
     time(&tval);
