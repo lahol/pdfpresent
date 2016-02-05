@@ -57,6 +57,11 @@ void main_prerender_overview_grid(void);
 GMutex overview_grid_lock;
 gint overview_grid_surface_valid = 0;
 
+GList *history_list = NULL;
+
+void main_history_mark_current(void);
+void main_history_back(void);
+
 enum WindowMode {
     WINDOW_MODE_PRESENTATION = 0,
     WINDOW_MODE_CONSOLE,
@@ -896,9 +901,11 @@ gboolean mode_normal_handle_key_press(GtkWidget *widget, GdkEventKey *event, gpo
             presentation_page_next();
             break;
         case GDK_KEY_Home:
+            main_history_mark_current();
             presentation_page_first();
             break;
         case GDK_KEY_End:
+            main_history_mark_current();
             presentation_page_last();
             break;
         case GDK_KEY_n:
@@ -920,6 +927,11 @@ gboolean mode_normal_handle_key_press(GtkWidget *widget, GdkEventKey *event, gpo
             config_step_preview();
             break;
 /*        case GDK_KEY_Escape:*/
+        case GDK_KEY_o:
+            if (event->state & GDK_CONTROL_MASK) {
+                main_history_back();
+            }
+            break;
         case GDK_KEY_q:
             main_quit();
             break;
@@ -996,6 +1008,7 @@ gboolean mode_overview_handle_key_press(GtkWidget *widget, GdkEventKey *event, g
         case GDK_KEY_Return:
         case GDK_KEY_KP_Enter:
             {
+                main_history_mark_current();
                 gint page_index = page_overview_get_selection(NULL, NULL);
                 presentation_page_goto(page_index);
 
@@ -1056,4 +1069,22 @@ void main_init_modes(void)
         mode_overview_handle_key_press;
     mode_class[PRESENTATION_MODE_OVERVIEW].handle_button_press =
         mode_overview_handle_button_press;
+}
+
+void main_history_mark_current(void)
+{
+    gint index = presentation_get_current_page();
+
+    history_list = g_list_prepend(history_list, GINT_TO_POINTER(index));
+}
+
+void main_history_back(void)
+{
+    if (!history_list)
+        return;
+    gint index = GPOINTER_TO_INT(history_list->data);
+
+    history_list = g_list_delete_link(history_list, history_list);
+
+    presentation_page_goto(index);
 }
