@@ -254,6 +254,22 @@ static gboolean _configure_event(GtkWidget *widget, GdkEventConfigure *event, gp
     windows[id].cx = event->width;
     windows[id].cy = event->height;
 
+    /* recalc overview rows */
+    /* FIXME: currently only assume ration 4:3 */
+    guint hr0 = 0, hr1 = 0;
+    if (windows[0].cy != 0 && windows[0].cx != 0)
+        hr0 = (windows[0].cy * _config.overview_columns * 4) / (windows[0].cx * 3);
+    if (windows[1].cy != 0 && windows[1].cx != 0)
+        hr1 = (windows[1].cy * _config.overview_columns * 4) / (windows[1].cx * 3);
+
+    if (hr0 < hr1)
+        _config.overview_rows = hr0;
+    else
+        _config.overview_rows = hr1;
+    if (_config.overview_rows == 0)
+        _config.overview_rows = 1;
+    page_overview_set_display_rows(_config.overview_rows);
+
     gtk_widget_queue_draw(widget);
 
     return FALSE;
@@ -427,12 +443,25 @@ static void render_console_window(cairo_t *cr, int width, int height)
 static void render_overview_window(cairo_t *cr, int width, int height)
 {
     guint col, row;
-    page_overview_get_selection(&row, &col);
-    cairo_set_source_rgb(cr, 1.0f, 0.0f, 0.0f);
+    gint index;
+    gchar *label;
 
     double w = ((double)width)/((double)_config.overview_columns);
     double h = ((double)height)/((double)_config.overview_rows);
 
+    for (col = 0; col < _config.overview_columns; ++col) {
+        for (row = 0; row < _config.overview_rows; ++row) {
+            if (page_overview_get_page(row, col, &index, &label)) {
+                cairo_save(cr);
+                cairo_translate(cr, col * w, row * h);
+                main_render_page(cr, index, w * 0.9f, h * 0.9f, 0, FALSE);
+                cairo_restore(cr);
+            }
+        }
+    }
+
+    page_overview_get_selection(&row, &col);
+    cairo_set_source_rgb(cr, 1.0f, 0.0f, 0.0f);
     cairo_rectangle(cr, col * w, row * h, w, h);
     cairo_stroke(cr);
 }

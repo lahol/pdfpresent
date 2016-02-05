@@ -44,7 +44,7 @@ void _page_overview_update_offset(void)
     if (page_overview.current_row < page_overview.offset)
         page_overview.offset = page_overview.current_row;
     else if (page_overview.current_row >= page_overview.offset + page_overview.display_rows)
-        page_overview.offset = page_overview.current_row - page_overview.display_rows - 1;
+        page_overview.offset = page_overview.current_row - page_overview.display_rows + 1;
 }
 
 void page_overview_set_display_rows(guint display_rows)
@@ -58,11 +58,12 @@ void page_overview_cleanup(void)
     g_free(page_overview.grid);
 }
 
-gboolean _page_overview_is_pos_valid(guint col, guint row)
+gint _page_overview_is_pos_valid(guint col, guint row)
 {
-    if (page_overview.columns * row + col < page_overview.page_count)
-        return TRUE;
-    return FALSE;
+    gint pos = page_overview.columns * row + col;
+    if (pos < page_overview.page_count)
+        return pos;
+    return -1;
 }
 
 /* do not allow navigation in both directions */
@@ -71,7 +72,10 @@ void page_overview_move(gint dx, gint dy)
     if (dy > 0) {
         if (page_overview.current_row + dy >= page_overview.rows)
             page_overview.current_row = page_overview.rows - 1;
-        if (!_page_overview_is_pos_valid(page_overview.current_column, page_overview.current_row) &&
+        else
+            page_overview.current_row += dy;
+
+        if (_page_overview_is_pos_valid(page_overview.current_column, page_overview.current_row) < 0 &&
                 page_overview.current_row > 0)
             --page_overview.current_row;
     }
@@ -83,12 +87,12 @@ void page_overview_move(gint dx, gint dy)
     }
     else if (dx > 0) {
         if (page_overview.current_column < page_overview.columns - 1) {
-            if (_page_overview_is_pos_valid(page_overview.current_column + 1, page_overview.current_row)) {
+            if (_page_overview_is_pos_valid(page_overview.current_column + 1, page_overview.current_row) >= 0) {
                 ++page_overview.current_column;
             }
         }
         else {
-            if (_page_overview_is_pos_valid(0, page_overview.current_row)) {
+            if (_page_overview_is_pos_valid(0, page_overview.current_row) >= 0) {
                 page_overview.current_column = 0;
                 ++page_overview.current_row;
             }
@@ -117,6 +121,20 @@ gint page_overview_get_selection(guint *row, guint *column)
     if (pos < page_overview.page_count)
         return page_overview.grid[pos].index;
     return -1;
+}
+
+gboolean page_overview_get_page(guint row, guint column, gint *index, gchar **label)
+{
+    gint pos;
+    if ((pos = _page_overview_is_pos_valid(column, row + page_overview.offset)) < 0)
+        return FALSE;
+
+    if (index)
+        *index = page_overview.grid[pos].index;
+    if (label)
+        *label = page_overview.grid[pos].label;
+
+    return TRUE;
 }
 
 void page_overview_set_page(gint index)
