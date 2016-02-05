@@ -177,3 +177,15 @@ void page_overview_update(void)
     page_overview.rows = (page_overview.page_count + page_overview.columns - 1) / page_overview.columns;
 }
 
+void page_overview_get_grid_size(guint *rows, guint *columns)
+{
+    if (rows)
+        *rows = page_overview.rows;
+    if (columns)
+        *columns = page_overview.columns;
+}
+
+guint page_overview_get_offset(void)
+{
+    return page_overview.offset;
+}

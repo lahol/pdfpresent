@@ -9,6 +9,8 @@ void page_overview_set_display_rows(guint display_rows);
 void page_overview_move(gint dx, gint dy);
 gint page_overview_get_selection(guint *row, guint *column);
 gboolean page_overview_get_page(guint row, guint column, gint *index, gchar **label);
+void page_overview_get_grid_size(guint *rows, guint *columns);
+guint page_overview_get_offset(void);
 
 void page_overview_set_page(gint index);
 void page_overview_update(void);

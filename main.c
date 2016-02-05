@@ -50,6 +50,13 @@ void main_file_monitor_cb(GFileMonitor *monitor, GFile *first, GFile *second, GF
 
 void main_init_modes(void);
 
+const double overview_cell_width = 256.0f;
+const double overview_cell_height = 192.0f;
+void main_prerender_overview_grid(void);
+
+GMutex overview_grid_lock;
+gint overview_grid_surface_valid = 0;
+
 enum WindowMode {
     WINDOW_MODE_PRESENTATION = 0,
     WINDOW_MODE_CONSOLE,
@@ -110,12 +117,16 @@ GdkCursor *blank_cursor = NULL;
 guint hide_cursor_source = 0;
 GTimer *hide_cursor_timer = NULL;
 
+cairo_surface_t *overview_grid_surface = NULL;
+
 int main(int argc, char **argv)
 {
     unsigned int i;
     unsigned int w, h;
 
     gtk_init(&argc, &argv);
+
+    g_mutex_init(&overview_grid_lock);
 
     main_init_modes();
     main_read_config(argc, argv);
@@ -141,6 +152,8 @@ int main(int argc, char **argv)
         page_cache_start_caching();
 
     presentation_init(page_action_callback, NULL);
+    main_prerender_overview_grid();
+
     i = presentation_get_current_page();
     page_cache_fetch_page(i, NULL, &w, &h, &_state.page_guess_split);
     _state.page_width = (double)w;
@@ -449,21 +462,93 @@ static void render_overview_window(cairo_t *cr, int width, int height)
     double w = ((double)width)/((double)_config.overview_columns);
     double h = ((double)height)/((double)_config.overview_rows);
 
-    for (col = 0; col < _config.overview_columns; ++col) {
-        for (row = 0; row < _config.overview_rows; ++row) {
-            if (page_overview_get_page(row, col, &index, &label)) {
-                cairo_save(cr);
-                cairo_translate(cr, col * w, row * h);
-                main_render_page(cr, index, w * 0.9f, h * 0.9f, 0, FALSE);
-                cairo_restore(cr);
+    if (g_atomic_int_get(&overview_grid_surface_valid)) {
+        double scale = ((double)width)/(_config.overview_columns * overview_cell_width);
+        cairo_scale(cr, scale, scale);
+
+        g_mutex_lock(&overview_grid_lock);
+        cairo_set_source_surface(cr, overview_grid_surface, 0.0, -(overview_cell_height * page_overview_get_offset()));
+        cairo_rectangle(cr, 0.0f, 0.0f, width, height);
+        cairo_fill(cr);
+        g_mutex_unlock(&overview_grid_lock);
+    }
+    else {
+        for (col = 0; col < _config.overview_columns; ++col) {
+            for (row = 0; row < _config.overview_rows; ++row) {
+                if (page_overview_get_page(row, col, &index, &label)) {
+                    cairo_save(cr);
+                    cairo_translate(cr, col * w, row * h);
+                    main_render_page(cr, index, w * 0.9f, h * 0.9f, 0, FALSE);
+                    cairo_restore(cr);
+                }
             }
         }
     }
 
     page_overview_get_selection(&row, &col);
     cairo_set_source_rgb(cr, 1.0f, 0.0f, 0.0f);
-    cairo_rectangle(cr, col * w, row * h, w, h);
+    cairo_rectangle(cr, col * overview_cell_width, row * overview_cell_height,
+                        overview_cell_width, overview_cell_height);
     cairo_stroke(cr);
+}
+
+gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
+{
+    guint rows, columns;
+    guint c, r;
+    gint index;
+    gint success = 0;
+    gchar *label;
+    page_overview_get_grid_size(&rows, &columns);
+
+    g_atomic_int_set(&overview_grid_surface_valid, 0);
+
+    /* FIXME: assumes 4:3 ratio
+     * FIXME: assumes 1024 width and 4 columns */
+
+    g_mutex_lock(&overview_grid_lock);
+
+    if (overview_grid_surface)
+        cairo_surface_destroy(overview_grid_surface);
+
+    overview_grid_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+            (int)(overview_cell_width * columns),
+            (int)(overview_cell_height * rows));
+
+    if (!overview_grid_surface)
+        goto done;
+
+    cairo_t *cr = cairo_create(overview_grid_surface);
+    cairo_set_source_rgb(cr, 0.0f, 0.0f, 0.0f);
+    cairo_rectangle(cr, 0, 0, overview_cell_width * columns, overview_cell_height * rows);
+    cairo_fill(cr);
+
+    for (r = 0; r < rows; ++r) {
+        for (c = 0; c < columns; ++c) {
+            if (page_overview_get_page(r, c, &index, &label)) {
+                cairo_save(cr);
+                cairo_translate(cr, c * overview_cell_width, r * overview_cell_height);
+                main_render_page(cr, index, overview_cell_width * 0.9f, overview_cell_height * 0.9f, 0, FALSE);
+                cairo_restore(cr);
+            }
+        }
+    }
+
+    cairo_destroy(cr);
+
+    success = 1;
+
+done:
+    g_mutex_unlock(&overview_grid_lock);
+    g_atomic_int_set(&overview_grid_surface_valid, success);
+
+    return NULL;
+}
+
+void main_prerender_overview_grid(void)
+{
+    GThread *thread = g_thread_new("OverviewGrid", (GThreadFunc)_main_prerender_overview_grid_thread_proc, NULL);
+    g_thread_unref(thread);
 }
 
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py)
@@ -717,6 +802,7 @@ void main_reload_document(void)
         page_cache_start_caching();
 
     presentation_update();
+    main_prerender_overview_grid();
 }
 
 void toggle_fullscreen(guint win_id)
