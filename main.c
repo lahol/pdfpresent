@@ -25,6 +25,7 @@ static void render_console_window(cairo_t *cr, int width, int height);
 static void render_overview_window(cairo_t *cr, int width, int height);
 void main_recalc_window_page_display(void);
 void main_reconfigure_windows(void);
+int main_window_overview_get_grid_position(unsigned int id, int wx, int wy, guint *row, guint *column);
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py);
 int main_page_to_window(unsigned int id, double px, double py, int *wx, int *wy);
 
@@ -570,6 +571,22 @@ void main_prerender_overview_grid(void)
     g_thread_unref(overview_grid_prerender_thread);
 }
 
+int main_window_overview_get_grid_position(unsigned int id, int wx, int wy, guint *row, guint *column)
+{
+    if (windows[id].window_mode != WINDOW_MODE_OVERVIEW)
+        return -1;
+
+    double scale = ((double)windows[id].cx)/(_config.overview_columns * overview_cell_width);
+    guint c = (guint)((wx) / (overview_cell_width * scale));
+    guint r = (guint)((wy) / (overview_cell_height * scale));
+
+    if (row)
+        *row = r;
+    if (column)
+        *column = c;
+    return 0;
+}
+
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py)
 {
     double scale, tmp;
@@ -1050,7 +1067,20 @@ gboolean mode_overview_handle_key_press(GtkWidget *widget, GdkEventKey *event, g
 
 gboolean mode_overview_handle_button_press(GtkWidget *widget, GdkEventButton *event, gpointer data)
 {
-    return FALSE;
+    unsigned int id = GPOINTER_TO_UINT(data);
+
+    guint row, column;
+
+    if (main_window_overview_get_grid_position(id, (int)event->x, (int)event->y, &row, &column) != 0)
+        return FALSE;
+
+    gint index;
+    if (page_overview_get_page(row, column, &index, NULL, FALSE)) {
+        presentation_page_goto(index);
+        main_set_mode(PRESENTATION_MODE_NORMAL);
+    }
+
+    return TRUE;
 }
 
 void main_set_mode(enum _PresentationModeType mode)
