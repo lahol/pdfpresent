@@ -45,6 +45,12 @@ void _page_overview_update_offset(void)
         page_overview.offset = page_overview.current_row;
     else if (page_overview.current_row >= page_overview.offset + page_overview.display_rows)
         page_overview.offset = page_overview.current_row - page_overview.display_rows + 1;
+    if (page_overview.rows < page_overview.display_rows + page_overview.offset) {
+        if (page_overview.rows >= page_overview.display_rows)
+            page_overview.offset = page_overview.rows - page_overview.display_rows;
+        else
+            page_overview.offset = 0;
+    }
 }
 
 void page_overview_set_display_rows(guint display_rows)
@@ -92,7 +98,7 @@ void page_overview_move(gint dx, gint dy)
             }
         }
         else {
-            if (_page_overview_is_pos_valid(0, page_overview.current_row) >= 0) {
+            if (_page_overview_is_pos_valid(0, page_overview.current_row + 1) >= 0) {
                 page_overview.current_column = 0;
                 ++page_overview.current_row;
             }
@@ -123,10 +129,10 @@ gint page_overview_get_selection(guint *row, guint *column)
     return -1;
 }
 
-gboolean page_overview_get_page(guint row, guint column, gint *index, gchar **label)
+gboolean page_overview_get_page(guint row, guint column, gint *index, gchar **label, gboolean absolute)
 {
     gint pos;
-    if ((pos = _page_overview_is_pos_valid(column, row + page_overview.offset)) < 0)
+    if ((pos = _page_overview_is_pos_valid(column, row + (absolute ? 0 : page_overview.offset))) < 0)
         return FALSE;
 
     if (index)

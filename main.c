@@ -480,7 +480,7 @@ static void render_overview_window(cairo_t *cr, int width, int height)
     else {
         for (col = 0; col < _config.overview_columns; ++col) {
             for (row = 0; row < _config.overview_rows; ++row) {
-                if (page_overview_get_page(row, col, &index, &label)) {
+                if (page_overview_get_page(row, col, &index, &label, FALSE)) {
                     cairo_save(cr);
                     cairo_translate(cr, col * w, row * h);
                     main_render_page(cr, index, w * 0.9f, h * 0.9f, 0, FALSE);
@@ -531,7 +531,7 @@ gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
 
     for (r = 0; r < rows; ++r) {
         for (c = 0; c < columns; ++c) {
-            if (page_overview_get_page(r, c, &index, &label)) {
+            if (page_overview_get_page(r, c, &index, &label, TRUE)) {
                 cairo_save(cr);
                 /* horizontal center in cell */
                 cairo_translate(cr, (c + 0.05f) * overview_cell_width, r * overview_cell_height);
