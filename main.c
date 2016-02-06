@@ -971,14 +971,14 @@ gboolean mode_normal_handle_button_press(GtkWidget *widget, GdkEventButton *even
         }
     }
     if (!found_link) {
-        if (event->button == 1) {
+        if (event->button == 1 && event->type == GDK_BUTTON_PRESS) {
             presentation_page_next();
         }
-        else if (event->button == 3) {
+        else if (event->button == 3 && event->type == GDK_BUTTON_PRESS) {
             presentation_page_prev();
         }
     }
-    return FALSE;
+    return TRUE;
 }
 
 void mode_overview_reconfigure_windows(void)
