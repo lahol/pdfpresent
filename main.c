@@ -54,8 +54,10 @@ const double overview_cell_width = 256.0f;
 const double overview_cell_height = 192.0f;
 void main_prerender_overview_grid(void);
 
+GThread *overview_grid_prerender_thread = NULL;
 GMutex overview_grid_lock;
-gint overview_grid_surface_valid = 0;
+gint overview_grid_surface_status = 0; /* 0: invalid, 1: valid, 2: in prerender */
+gint cancel_running_threads = 0;
 
 GList *history_list = NULL;
 
@@ -464,16 +466,14 @@ static void render_overview_window(cairo_t *cr, int width, int height)
     gint index;
     gchar *label;
 
-    double w = ((double)width)/((double)_config.overview_columns);
-    double h = ((double)height)/((double)_config.overview_rows);
+    double scale = ((double)width)/(_config.overview_columns * overview_cell_width);
+    cairo_scale(cr, scale, scale);
 
-    if (g_atomic_int_get(&overview_grid_surface_valid)) {
-        double scale = ((double)width)/(_config.overview_columns * overview_cell_width);
-        cairo_scale(cr, scale, scale);
+    if (g_atomic_int_get(&overview_grid_surface_status) == 1) {
 
         g_mutex_lock(&overview_grid_lock);
         cairo_set_source_surface(cr, overview_grid_surface, 0.0, -(overview_cell_height * page_overview_get_offset()));
-        cairo_rectangle(cr, 0.0f, 0.0f, width, height);
+        cairo_rectangle(cr, 0.0f, 0.0f, width / scale, height / scale);
         cairo_fill(cr);
         g_mutex_unlock(&overview_grid_lock);
     }
@@ -482,8 +482,8 @@ static void render_overview_window(cairo_t *cr, int width, int height)
             for (row = 0; row < _config.overview_rows; ++row) {
                 if (page_overview_get_page(row, col, &index, &label, FALSE)) {
                     cairo_save(cr);
-                    cairo_translate(cr, col * w, row * h);
-                    main_render_page(cr, index, w * 0.9f, h * 0.9f, 0, FALSE);
+                    cairo_translate(cr, col * overview_cell_width, row * overview_cell_height);
+                    main_render_page(cr, index, overview_cell_width * 0.9f, overview_cell_height * 0.9f, 0, FALSE);
                     cairo_restore(cr);
                 }
             }
@@ -507,7 +507,7 @@ gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
     cairo_text_extents_t ext;
     page_overview_get_grid_size(&rows, &columns);
 
-    g_atomic_int_set(&overview_grid_surface_valid, 0);
+    g_atomic_int_set(&overview_grid_surface_status, 2);
 
     /* FIXME: assumes 4:3 ratio
      * FIXME: assumes 1024 width and 4 columns */
@@ -531,6 +531,8 @@ gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
 
     for (r = 0; r < rows; ++r) {
         for (c = 0; c < columns; ++c) {
+            if (g_atomic_int_get(&cancel_running_threads))
+                goto cancel;
             if (page_overview_get_page(r, c, &index, &label, TRUE)) {
                 cairo_save(cr);
                 /* horizontal center in cell */
@@ -549,21 +551,23 @@ gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
         }
     }
 
-    cairo_destroy(cr);
 
     success = 1;
 
+cancel:
+    cairo_destroy(cr);
+
 done:
     g_mutex_unlock(&overview_grid_lock);
-    g_atomic_int_set(&overview_grid_surface_valid, success);
+    g_atomic_int_set(&overview_grid_surface_status, success);
 
     return NULL;
 }
 
 void main_prerender_overview_grid(void)
 {
-    GThread *thread = g_thread_new("OverviewGrid", (GThreadFunc)_main_prerender_overview_grid_thread_proc, NULL);
-    g_thread_unref(thread);
+    overview_grid_prerender_thread = g_thread_new("OverviewGrid", (GThreadFunc)_main_prerender_overview_grid_thread_proc, NULL);
+    g_thread_unref(overview_grid_prerender_thread);
 }
 
 int main_window_to_page(unsigned int id, int wx, int wy, double *px, double *py)
@@ -740,6 +744,12 @@ void main_read_config(int argc, char **argv)
 
 void main_quit(void)
 {
+    /* if we are still in prerender thread, cancel it */
+    if (g_atomic_int_get(&overview_grid_surface_status) == 2) {
+        g_atomic_int_set(&cancel_running_threads, 1);
+        g_mutex_lock(&overview_grid_lock);
+        g_mutex_unlock(&overview_grid_lock);
+    }
     gtk_main_quit();
 }
 
