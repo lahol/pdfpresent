@@ -107,6 +107,8 @@ struct _PresentationMode {
     void (*handle_reconfigure)(void);
     gboolean (*handle_key_press)(GtkWidget *, GdkEventKey *, gpointer);
     gboolean (*handle_button_press)(GtkWidget *, GdkEventButton *, gpointer);
+    gboolean (*handle_scroll_event)(GtkWidget *, GdkEventScroll *, gpointer);
+    gboolean (*handle_motion_event)(GtkWidget *, GdkEventMotion *, gpointer);
 };
 
 enum _PresentationModeType {
@@ -316,35 +318,12 @@ static gboolean _button_press_event(GtkWidget *widget, GdkEventButton *event, gp
 
 static gboolean _scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer data)
 {
-    if (event->direction == GDK_SCROLL_UP)
-        presentation_page_prev();
-    else if (event->direction == GDK_SCROLL_DOWN)
-        presentation_page_next();
-    return FALSE;
+    return mode_class[current_mode].handle_scroll_event(widget, event, data);
 }
 
 static gboolean _motion_notify_event(GtkWidget *widget, GdkEventMotion *event, gpointer data)
 {
-    unsigned int id = GPOINTER_TO_UINT(data);
-    int found_link = 0;
-    double px, py;
-    if (!_config.show_preview && main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
-        if (page_cache_get_action_from_pos(px, py)) {
-            found_link = 1;
-        }
-    }
-    if (found_link) {
-        gdk_window_set_cursor(gtk_widget_get_window(widget), hand_cursor);
-    }
-    else {
-        gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
-    }
-    if (!hide_cursor_timer)
-        hide_cursor_timer = g_timer_new();
-    g_timer_start(hide_cursor_timer);
-    if (!hide_cursor_source)
-        hide_cursor_source = g_idle_add(main_check_mouse_motion, NULL);
-    return FALSE;
+    return mode_class[current_mode].handle_motion_event(widget, event, data);
 }
 
 static gboolean _window_state_event(GtkWidget *widget, GdkEventWindowState *event, gpointer data)
@@ -998,6 +977,39 @@ gboolean mode_normal_handle_button_press(GtkWidget *widget, GdkEventButton *even
     return TRUE;
 }
 
+gboolean mode_normal_handle_scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer data)
+{
+    if (event->direction == GDK_SCROLL_UP)
+        presentation_page_prev();
+    else if (event->direction == GDK_SCROLL_DOWN)
+        presentation_page_next();
+    return FALSE;
+}
+
+gboolean mode_normal_handle_motion_event(GtkWidget *widget, GdkEventMotion *event, gpointer data)
+{
+    unsigned int id = GPOINTER_TO_UINT(data);
+    int found_link = 0;
+    double px, py;
+    if (!_config.show_preview && main_window_to_page(id, (int)event->x, (int)event->y, &px, &py) == 0) {
+        if (page_cache_get_action_from_pos(px, py)) {
+            found_link = 1;
+        }
+    }
+    if (found_link) {
+        gdk_window_set_cursor(gtk_widget_get_window(widget), hand_cursor);
+    }
+    else {
+        gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
+    }
+    if (!hide_cursor_timer)
+        hide_cursor_timer = g_timer_new();
+    g_timer_start(hide_cursor_timer);
+    if (!hide_cursor_source)
+        hide_cursor_source = g_idle_add(main_check_mouse_motion, NULL);
+    return FALSE;
+}
+
 void mode_overview_reconfigure_windows(void)
 {
     windows[1].render = render_overview_window;
@@ -1071,15 +1083,28 @@ gboolean mode_overview_handle_button_press(GtkWidget *widget, GdkEventButton *ev
 
     guint row, column;
 
-    if (main_window_overview_get_grid_position(id, (int)event->x, (int)event->y, &row, &column) != 0)
-        return FALSE;
+    if (event->button == 1) {
+        if (main_window_overview_get_grid_position(id, (int)event->x, (int)event->y, &row, &column) != 0)
+            return FALSE;
 
-    gint index;
-    if (page_overview_get_page(row, column, &index, NULL, FALSE)) {
-        presentation_page_goto(index);
-        main_set_mode(PRESENTATION_MODE_NORMAL);
+        gint index;
+        if (page_overview_get_page(row, column, &index, NULL, FALSE)) {
+            presentation_page_goto(index);
+            main_set_mode(PRESENTATION_MODE_NORMAL);
+        }
+        return TRUE;
     }
 
+    return FALSE;
+}
+
+gboolean mode_overview_handle_scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer data)
+{
+    return TRUE;
+}
+
+gboolean mode_overview_handle_motion_event(GtkWidget *widget, GdkEventMotion *event, gpointer data)
+{
     return TRUE;
 }
 
@@ -1102,6 +1127,10 @@ void main_init_modes(void)
         mode_normal_handle_key_press;
     mode_class[PRESENTATION_MODE_NORMAL].handle_button_press =
         mode_normal_handle_button_press;
+    mode_class[PRESENTATION_MODE_NORMAL].handle_scroll_event =
+        mode_normal_handle_scroll_event;
+    mode_class[PRESENTATION_MODE_NORMAL].handle_motion_event =
+        mode_normal_handle_motion_event;
 
     mode_class[PRESENTATION_MODE_OVERVIEW].handle_reconfigure =
         mode_overview_reconfigure_windows;
@@ -1109,6 +1138,10 @@ void main_init_modes(void)
         mode_overview_handle_key_press;
     mode_class[PRESENTATION_MODE_OVERVIEW].handle_button_press =
         mode_overview_handle_button_press;
+    mode_class[PRESENTATION_MODE_OVERVIEW].handle_scroll_event =
+        mode_overview_handle_scroll_event;
+    mode_class[PRESENTATION_MODE_OVERVIEW].handle_motion_event =
+        mode_overview_handle_motion_event;
 }
 
 void main_history_mark_current(void)
