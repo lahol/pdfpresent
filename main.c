@@ -1100,12 +1100,26 @@ gboolean mode_overview_handle_button_press(GtkWidget *widget, GdkEventButton *ev
 
 gboolean mode_overview_handle_scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer data)
 {
+    if (event->direction == GDK_SCROLL_UP)
+        page_overview_scroll(-1);
+    else if (event->direction == GDK_SCROLL_DOWN)
+        page_overview_scroll(1);
+
+    gtk_widget_queue_draw(windows[0].win);
+    gtk_widget_queue_draw(windows[1].win);
+
     return TRUE;
 }
 
 gboolean mode_overview_handle_motion_event(GtkWidget *widget, GdkEventMotion *event, gpointer data)
 {
-    return TRUE;
+    gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
+    if (!hide_cursor_timer)
+        hide_cursor_timer = g_timer_new();
+    g_timer_start(hide_cursor_timer);
+    if (!hide_cursor_source)
+        hide_cursor_source = g_idle_add(main_check_mouse_motion, NULL);
+    return FALSE;
 }
 
 void main_set_mode(enum _PresentationModeType mode)

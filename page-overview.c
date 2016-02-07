@@ -116,6 +116,22 @@ void page_overview_move(gint dx, gint dy)
     _page_overview_update_offset();
 }
 
+void page_overview_scroll(gint dy)
+{
+    if (dy < 0 && -dy > page_overview.offset)
+        page_overview.offset = 0;
+    else
+        page_overview.offset += dy;
+
+    if (page_overview.offset >= page_overview.rows)
+        page_overview.offset = page_overview.rows - 1;
+
+    if (page_overview.offset > page_overview.current_row)
+        page_overview.current_row = page_overview.offset;
+    else if (page_overview.offset + page_overview.display_rows - 1 < page_overview.current_row)
+        page_overview.current_row = page_overview.offset + page_overview.display_rows - 1;
+}
+
 gint page_overview_get_selection(guint *row, guint *column)
 {
     if (row)
