@@ -443,8 +443,6 @@ static void render_console_window(cairo_t *cr, int width, int height)
 static void render_overview_window(cairo_t *cr, int width, int height)
 {
     guint col, row;
-    gint index;
-    gchar *label;
 
     double scale = ((double)width)/(_config.overview_columns * overview_cell_width);
     cairo_scale(cr, scale, scale);
@@ -458,12 +456,24 @@ static void render_overview_window(cairo_t *cr, int width, int height)
         g_mutex_unlock(&overview_grid_lock);
     }
     else {
+        gint index;
+        gchar *label;
+        cairo_text_extents_t ext;
+
         for (col = 0; col < _config.overview_columns; ++col) {
             for (row = 0; row < _config.overview_rows; ++row) {
                 if (page_overview_get_page(row, col, &index, &label, FALSE)) {
                     cairo_save(cr);
-                    cairo_translate(cr, col * overview_cell_width, row * overview_cell_height);
+                    cairo_translate(cr, (col + 0.05) * overview_cell_width, row * overview_cell_height);
                     main_render_page(cr, index, overview_cell_width * 0.9f, overview_cell_height * 0.9f, 0, FALSE);
+
+                    cairo_set_source_rgb(cr, 1.0f, 1.0f, 1.0f);
+                    cairo_set_font_size(cr, 8);
+                    cairo_text_extents(cr, label, &ext);
+                    cairo_move_to(cr, overview_cell_width - ext.x_advance - 0.1f * overview_cell_width,
+                                      overview_cell_height + ext.y_bearing);
+                    cairo_show_text(cr, label);
+
                     cairo_restore(cr);
                 }
             }
