@@ -1,7 +1,0 @@
-pdfpresent is intended as a simple presentation software for slides in PDF format.
-The main idea is to provide to separate windows, one for the main presentation and one
-for the so called console. There the current time and the current prerender status are shown.
-Also there is support for notes (as optionally provided by the LaTeX beamer class) which
-should be recognized automatically.
-
-pdfpresent is released under a MIT license. See LICENSE for details.
