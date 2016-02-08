@@ -253,6 +253,10 @@ void main_cleanup(void)
         }
     }
     g_free(_config.filename);
+
+    if (overview_grid_surface)
+        cairo_surface_destroy(overview_grid_surface);
+
     if (hide_cursor_timer)
         g_timer_destroy(hide_cursor_timer);
     if (hide_cursor_source)
@@ -511,7 +515,7 @@ gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
             (int)(overview_cell_width * columns),
             (int)(overview_cell_height * rows));
 
-    if (!overview_grid_surface)
+    if (cairo_surface_status(overview_grid_surface) != CAIRO_STATUS_SUCCESS)
         goto done;
 
     cairo_t *cr = cairo_create(overview_grid_surface);
