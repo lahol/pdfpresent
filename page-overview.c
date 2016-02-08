@@ -130,6 +130,9 @@ void page_overview_scroll(gint dy)
         page_overview.current_row = page_overview.offset;
     else if (page_overview.offset + page_overview.display_rows - 1 < page_overview.current_row)
         page_overview.current_row = page_overview.offset + page_overview.display_rows - 1;
+
+    if (_page_overview_is_pos_valid(page_overview.current_column, page_overview.current_row) < 0)
+        page_overview.current_column = page_overview.page_count % page_overview.columns - 1;
 }
 
 gint page_overview_get_selection(guint *row, guint *column)
