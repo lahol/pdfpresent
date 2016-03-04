@@ -852,6 +852,8 @@ void main_reload_document(void)
         page_cache_start_caching();
 
     presentation_update();
+
+    page_overview_update();
     main_prerender_overview_grid();
 }
 
