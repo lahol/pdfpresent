@@ -215,8 +215,8 @@ int main(int argc, char **argv)
         gtk_widget_set_app_paintable(windows[i].win, TRUE);
         gtk_window_set_default_size(GTK_WINDOW(windows[i].win), 800, 600);
     }
-    gtk_window_set_wmclass(GTK_WINDOW(windows[0].win), "presentation", "Pdfpresent");
-    gtk_window_set_wmclass(GTK_WINDOW(windows[1].win), "console", "Pdfpresent");
+    gtk_window_set_role(GTK_WINDOW(windows[0].win), "presentation");
+    gtk_window_set_role(GTK_WINDOW(windows[1].win), "console");
 
     main_reconfigure_windows();
 
