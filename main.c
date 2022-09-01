@@ -51,8 +51,9 @@ void main_file_monitor_cb(GFileMonitor *monitor, GFile *first, GFile *second, GF
 
 void main_init_modes(void);
 
-const double overview_cell_width = 256.0f;
-const double overview_cell_height = 192.0f;
+double overview_cell_width = 256.0f;
+double overview_cell_height = 192.0f;
+void main_set_overview_page_width(unsigned int width);
 void main_prerender_overview_grid(void);
 
 GThread *overview_grid_prerender_thread = NULL;
@@ -87,6 +88,7 @@ struct _Win {
 struct _PresenterConfig {
     gchar *filename;
     unsigned int scale_to_height;
+    unsigned int overview_page_width;
     unsigned int force_notes : 2; /* override guess, 1: override, show, 2: override, don't show, 0: use guess */
     unsigned int show_console : 1;
     unsigned int show_preview : 1;
@@ -162,6 +164,8 @@ int main(int argc, char **argv)
         page_cache_start_caching();
 
     presentation_init(page_action_callback, NULL);
+
+    main_set_overview_page_width(_config.overview_page_width);
     main_prerender_overview_grid();
 
     i = presentation_get_current_page();
@@ -253,6 +257,10 @@ void main_cleanup(void)
         }
     }
     g_free(_config.filename);
+
+    if (overview_grid_surface)
+        cairo_surface_destroy(overview_grid_surface);
+
     if (hide_cursor_timer)
         g_timer_destroy(hide_cursor_timer);
     if (hide_cursor_source)
@@ -440,11 +448,36 @@ static void render_console_window(cairo_t *cr, int width, int height)
     cairo_show_text(cr, buffer);
 }
 
+void render_overview_window_page_thumbnail(cairo_t *cr, gint index, gchar *label, guint row, guint column)
+{
+    cairo_text_extents_t ext;
+
+    cairo_save(cr);
+    /* horizontal center in cell */
+    cairo_translate(cr, (column + 0.05) * overview_cell_width, row * overview_cell_height);
+    main_render_page(cr, index, overview_cell_width * 0.9f, overview_cell_height * 0.9f, 0, FALSE);
+
+    cairo_set_source_rgb(cr, 1.0f, 1.0f, 1.0f);
+    cairo_set_font_size(cr, 8);
+    cairo_text_extents(cr, label, &ext);
+    cairo_move_to(cr, overview_cell_width - ext.x_advance - 0.1f * overview_cell_width,
+                      overview_cell_height + ext.y_bearing);
+    cairo_show_text(cr, label);
+
+    /* Draw outline */
+    cairo_set_source_rgb(cr, 0.0f, 0.0f, 0.0f);
+    cairo_set_line_width(cr, 0.2f);
+    cairo_move_to(cr, overview_cell_width - ext.x_advance - 0.1f * overview_cell_width,
+                      overview_cell_height + ext.y_bearing);
+    cairo_text_path(cr, label);
+    cairo_stroke(cr);
+
+    cairo_restore(cr);
+}
+
 static void render_overview_window(cairo_t *cr, int width, int height)
 {
     guint col, row;
-    gint index;
-    gchar *label;
 
     double scale = ((double)width)/(_config.overview_columns * overview_cell_width);
     cairo_scale(cr, scale, scale);
@@ -458,13 +491,13 @@ static void render_overview_window(cairo_t *cr, int width, int height)
         g_mutex_unlock(&overview_grid_lock);
     }
     else {
+        gint index;
+        gchar *label;
+
         for (col = 0; col < _config.overview_columns; ++col) {
             for (row = 0; row < _config.overview_rows; ++row) {
                 if (page_overview_get_page(row, col, &index, &label, FALSE)) {
-                    cairo_save(cr);
-                    cairo_translate(cr, col * overview_cell_width, row * overview_cell_height);
-                    main_render_page(cr, index, overview_cell_width * 0.9f, overview_cell_height * 0.9f, 0, FALSE);
-                    cairo_restore(cr);
+                    render_overview_window_page_thumbnail(cr, index, label, row, col);
                 }
             }
         }
@@ -484,13 +517,10 @@ gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
     gint index;
     gint success = 0;
     gchar *label;
-    cairo_text_extents_t ext;
+
     page_overview_get_grid_size(&rows, &columns);
 
     g_atomic_int_set(&overview_grid_surface_status, 2);
-
-    /* FIXME: assumes 4:3 ratio
-     * FIXME: assumes 1024 width and 4 columns */
 
     g_mutex_lock(&overview_grid_lock);
 
@@ -501,7 +531,7 @@ gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
             (int)(overview_cell_width * columns),
             (int)(overview_cell_height * rows));
 
-    if (!overview_grid_surface)
+    if (cairo_surface_status(overview_grid_surface) != CAIRO_STATUS_SUCCESS)
         goto done;
 
     cairo_t *cr = cairo_create(overview_grid_surface);
@@ -514,19 +544,7 @@ gpointer _main_prerender_overview_grid_thread_proc(gpointer null)
             if (g_atomic_int_get(&cancel_running_threads))
                 goto cancel;
             if (page_overview_get_page(r, c, &index, &label, TRUE)) {
-                cairo_save(cr);
-                /* horizontal center in cell */
-                cairo_translate(cr, (c + 0.05f) * overview_cell_width, r * overview_cell_height);
-                main_render_page(cr, index, overview_cell_width * 0.9f, overview_cell_height * 0.9f, 0, FALSE);
-
-                cairo_set_source_rgb(cr, 1.0f, 1.0f, 1.0f);
-                cairo_set_font_size(cr, 8);
-                cairo_text_extents(cr, label, &ext);
-                cairo_move_to(cr, overview_cell_width - ext.x_advance - 0.1f * overview_cell_width,
-                                  overview_cell_height + ext.y_bearing);
-                cairo_show_text(cr, label);
-
-                cairo_restore(cr);
+                render_overview_window_page_thumbnail(cr, index, label, r, c);
             }
         }
     }
@@ -542,6 +560,14 @@ done:
     g_atomic_int_set(&overview_grid_surface_status, success);
 
     return NULL;
+}
+
+void main_set_overview_page_width(unsigned int width)
+{
+    /* FIXME: still assumes 4:3 ratio */
+    /* FIXME: assumes 4 columns */
+    overview_cell_width = 0.25f * width;
+    overview_cell_height = 0.1875 * width;
 }
 
 void main_prerender_overview_grid(void)
@@ -701,7 +727,9 @@ static GOptionEntry entries[] = {
     { "notes", 'n', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Assume there are notes or not, guess value", "value" },
     { "preview", 'p', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Show preview of next slide", "value" },
     { "height", 'h', 0, G_OPTION_ARG_INT, &_config.scale_to_height, "Use pixmap of this height for prerendering", "N" },
-    { "no-cache", 0, G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Do not cache pages", NULL }
+    { "no-cache", 0, G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, _main_parse_option, "Do not cache pages", NULL },
+    { "overview-page-width", 'w', 0, G_OPTION_ARG_INT, &_config.overview_page_width, "Prerender overview page to this width", "N" },
+    { NULL }
 };
 
 void main_read_config(int argc, char **argv)
@@ -713,6 +741,7 @@ void main_read_config(int argc, char **argv)
     _config.scale_to_height = 768;
     _config.overview_columns = 4;
     _config.overview_rows = 3;
+    _config.overview_page_width = 1024;
 
     GError *error = NULL;;
     GOptionContext *context = g_option_context_new("FILE - make two window presentations with presenter console");
@@ -823,6 +852,8 @@ void main_reload_document(void)
         page_cache_start_caching();
 
     presentation_update();
+
+    page_overview_update();
     main_prerender_overview_grid();
 }
 
